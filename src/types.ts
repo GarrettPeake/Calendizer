@@ -42,8 +42,8 @@ export type Child =
 
 export interface PeriodSpec {
   unit: 'day' | 'week' | 'month' | 'mode';
-  /** Ignored when unit === "mode". */
-  interval: number;
+  /** Recurrence interval (defaults to 1). Ignored when unit === "mode". */
+  interval?: number;
 }
 
 export type DaysSpec =

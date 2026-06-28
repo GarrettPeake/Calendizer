@@ -57,6 +57,30 @@ out.conflicts; // constraints in tension, if any
 
 `renderICS(out.instances)` flattens the result into an ICS feed.
 
+## Playground (`web/`)
+
+A React + Vite app for messing about with the solver interactively. It imports the
+library **directly from `../src`** (via a `calendizer` alias) so it always runs the
+real engine.
+
+```bash
+cd web
+npm install
+npm run dev      # http://localhost:5173
+```
+
+Features:
+- **Base-calendar library** — empty, busy professional, university student, family
+  logistics, and a vacation-mode week — loaded as the fixed events the solver routes
+  around.
+- **Intent library** — one-click presets (pottery, morning routine, medication,
+  stretching, Mai Tai, fishing, guitar, gym, deep work, reading); each can be tweaked,
+  or edit the whole intent set as raw JSON.
+- **Editable global config & modes** (wakeup/sleep, grid, padding, location, etc.).
+- **A week calendar** you navigate across weeks; fixed events and solved instances are
+  colour-coded, children and "placed during sleep" are shown, visual overlaps are
+  outlined, and conflicts surface in a banner. Everything re-solves live as you edit.
+
 ## Architecture (`src/`)
 
 | Module | Responsibility |
