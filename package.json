@@ -1,0 +1,20 @@
+{
+  "name": "calendizer",
+  "version": "0.1.0",
+  "description": "Deterministic calendar manager: ingests declarative intents + an existing calendar and outputs a set of updates.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "cucumber-js",
+    "test:seed": "cucumber-js features/seed"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "@cucumber/cucumber": "^11.1.0",
+    "@types/node": "^22.10.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.7.2"
+  }
+}
