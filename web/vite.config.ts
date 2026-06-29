@@ -2,8 +2,9 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import path from 'node:path';
 
-// The playground imports the Calendizer library directly from ../src so it stays
-// live against the real solver. esbuild transpiles the TS sources on the fly.
+// The playground imports the Calendizer library's TYPES directly from ../src.
+// API/feed requests are proxied to the Worker (`wrangler dev` on :8787) in
+// development; in production the Worker serves this built SPA and the API itself.
 export default defineConfig({
   plugins: [react()],
   resolve: {
@@ -12,9 +13,10 @@ export default defineConfig({
     },
   },
   server: {
-    fs: {
-      // allow importing the library source that lives outside the web/ root
-      allow: [path.resolve(__dirname, '..')],
+    fs: { allow: [path.resolve(__dirname, '..')] },
+    proxy: {
+      '/api': 'http://localhost:8787',
+      '/feed': 'http://localhost:8787',
     },
   },
 });

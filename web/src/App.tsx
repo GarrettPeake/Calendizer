@@ -1,135 +1,220 @@
-import { useMemo, useState } from 'react';
-import { solve } from 'calendizer';
-import type { GlobalConfig, Intent, Mode, SolveOutput } from 'calendizer';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import type { GlobalConfig, Intent } from 'calendizer';
+import { api, getToken, setToken, type FeedInfo, type ModeRecord, type SolveResponse, type User } from './api';
+import { Login } from './Login';
 import { Sidebar } from './components/Sidebar';
 import { WeekCalendar } from './components/WeekCalendar';
-import { BASE_CALENDARS } from './data/calendars';
+import { IntentEditor, blankIntent } from './components/IntentEditor';
 import { INTENT_LIBRARY } from './data/intents';
-import { expandFixed } from './lib/expandFixed';
 import { addDays, mondayOf, rangeLabel, weekDates } from './lib/dates';
 
-// The playground anchors "today" to the project's reference date so the seeded
-// example dates (e.g. the Saturday fishing trip) line up.
-const TODAY = '2026-06-28';
-const HORIZON_START = mondayOf(TODAY); // 2026-06-22
-
-const DEFAULT_CONFIG: GlobalConfig = {
-  wakeup: '07:00',
-  sleep: '23:00',
-  padding: 0,
-  grid: 5,
-  min_break: 15,
-  max_block: 180,
-  utcOffsetMinutes: 0,
-};
-
-const STARTER_INTENTS: Intent[] = [
-  structuredClone(INTENT_LIBRARY.find((p) => p.id === 'medication')!.intent),
-  structuredClone(INTENT_LIBRARY.find((p) => p.id === 'gym')!.intent),
-  structuredClone(INTENT_LIBRARY.find((p) => p.id === 'guitar')!.intent),
-];
+const NO_FIXED: never[] = [];
 
 export function App() {
-  const [calendarId, setCalendarId] = useState('professional');
-  const [config, setConfig] = useState<GlobalConfig>(DEFAULT_CONFIG);
-  const [userModes, setUserModes] = useState<Mode[]>([]);
-  const [intents, setIntents] = useState<Intent[]>(STARTER_INTENTS);
-  const [horizonWeeks, setHorizonWeeks] = useState(4);
+  const [user, setUser] = useState<User | null>(null);
+  const [booting, setBooting] = useState(true);
+
+  const [config, setConfigState] = useState<GlobalConfig | null>(null);
+  const [intents, setIntents] = useState<Intent[]>([]);
+  const [modes, setModes] = useState<ModeRecord[]>([]);
+  const [solveResp, setSolveResp] = useState<SolveResponse | null>(null);
+  const [feed, setFeed] = useState<FeedInfo | null>(null);
   const [viewWeek, setViewWeek] = useState(0);
+  const [editing, setEditing] = useState<{ intent: Intent; isNew: boolean } | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  const calendar = BASE_CALENDARS.find((c) => c.id === calendarId)!;
+  const configDirty = useRef(false);
+  const initialWeekSet = useRef(false);
 
-  const mondays = useMemo(
-    () => Array.from({ length: horizonWeeks }, (_, w) => addDays(HORIZON_START, w * 7)),
-    [horizonWeeks]
-  );
-  const horizon = useMemo(
-    () => ({ start: HORIZON_START, end: addDays(HORIZON_START, horizonWeeks * 7 - 1) }),
-    [horizonWeeks]
-  );
-  const solverModes = useMemo(() => [...(calendar.modes ?? []), ...userModes], [calendar, userModes]);
-  const fixed = useMemo(() => expandFixed(calendar, mondays), [calendar, mondays]);
-
-  const { output, error } = useMemo<{ output: SolveOutput | null; error: string | null }>(() => {
-    try {
-      return {
-        output: solve({ config, intents, modes: solverModes, existingCalendar: fixed, horizon }),
-        error: null,
-      };
-    } catch (e) {
-      return { output: null, error: e instanceof Error ? e.message : String(e) };
-    }
-  }, [config, intents, solverModes, fixed, horizon]);
-
-  const safeViewWeek = Math.min(viewWeek, horizonWeeks - 1);
-  const days = weekDates(mondays[safeViewWeek]);
-  const conflictsThisWeek = (output?.conflicts ?? []).filter(
-    (c) => !c.date || (c.date >= days[0] && c.date <= days[6])
-  );
-
-  function loadCalendar(id: string) {
-    setCalendarId(id);
-    const cal = BASE_CALENDARS.find((c) => c.id === id)!;
-    if (cal.configPatch) setConfig((cfg) => ({ ...cfg, ...cal.configPatch }));
-  }
-
-  function addPreset(presetId: string) {
-    const preset = INTENT_LIBRARY.find((p) => p.id === presetId)!;
-    setIntents((prev) => [...prev, structuredClone(preset.intent)]);
-    if (preset.needsMode) {
-      const has = solverModes.some((m) => m.name === preset.needsMode);
-      if (!has) {
-        setUserModes((prev) => [
-          ...prev,
-          { name: preset.needsMode!, span: [HORIZON_START, addDays(HORIZON_START, 6)] },
-        ]);
+  /* ---------------- boot: validate token, load everything ---------------- */
+  useEffect(() => {
+    (async () => {
+      if (!getToken()) {
+        setBooting(false);
+        return;
       }
+      try {
+        const me = await api.me();
+        setUser(me.user);
+        await loadAll();
+      } catch {
+        setToken(null);
+      } finally {
+        setBooting(false);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function loadAll() {
+    const [cfg, ints, mds, slv, fd] = await Promise.all([
+      api.getConfig(),
+      api.listIntents(),
+      api.listModes(),
+      api.solve(),
+      api.getFeed(),
+    ]);
+    setConfigState(cfg);
+    setIntents(ints);
+    setModes(mds);
+    setSolveResp(slv);
+    setFeed(fd);
+  }
+
+  async function reload() {
+    const [ints, mds, slv] = await Promise.all([api.listIntents(), api.listModes(), api.solve()]);
+    setIntents(ints);
+    setModes(mds);
+    setSolveResp(slv);
+  }
+
+  function guard<T>(p: Promise<T>): Promise<T | void> {
+    return p.catch((e) => setError(e instanceof Error ? e.message : String(e)));
+  }
+
+  /* ---------------- config: debounced persist + re-solve ---------------- */
+  useEffect(() => {
+    if (!config || !configDirty.current) return;
+    const t = setTimeout(async () => {
+      configDirty.current = false;
+      await guard(api.putConfig(config).then(() => api.solve()).then(setSolveResp));
+    }, 500);
+    return () => clearTimeout(t);
+  }, [config]);
+
+  function changeConfig(next: GlobalConfig) {
+    configDirty.current = true;
+    setConfigState(next);
+  }
+
+  /* ---------------- mutations ---------------- */
+  async function onAddPreset(presetId: string) {
+    const preset = INTENT_LIBRARY.find((p) => p.id === presetId);
+    if (!preset) return;
+    await guard(api.createIntent(structuredClone(preset.intent)).then(reload));
+    if (preset.needsMode && !modes.some((m) => m.name === preset.needsMode)) {
+      const start = solveResp?.horizon.start ?? mondayOf(today);
+      await guard(api.createMode({ name: preset.needsMode, span: [start, addDays(start, 6)] }).then(reload));
     }
   }
+  async function saveEditing(updated: Intent) {
+    if (!editing) return;
+    const p = editing.isNew ? api.createIntent(updated) : api.updateIntent(updated.id!, updated);
+    await guard(p.then(reload));
+    setEditing(null);
+  }
+  async function deleteIntent(id: string) {
+    await guard(api.deleteIntent(id).then(reload));
+  }
+  async function aiAdd(query: string): Promise<{ explanation?: string }> {
+    const res = await api.smart(query);
+    await reload();
+    return { explanation: res.explanation };
+  }
+  async function rotateFeed() {
+    await guard(api.rotateFeed().then(setFeed));
+  }
+
+  function logout() {
+    setToken(null);
+    setUser(null);
+    setConfigState(null);
+    setIntents([]);
+    setModes([]);
+    setSolveResp(null);
+    initialWeekSet.current = false;
+  }
+
+  /* ---------------- derived: weeks + today ---------------- */
+  const today = useMemo(
+    () => new Date(Date.now() + (config?.utcOffsetMinutes ?? 0) * 60_000).toISOString().slice(0, 10),
+    [config]
+  );
+  const mondays = useMemo(() => {
+    if (!solveResp) return [];
+    const out: string[] = [];
+    let m = mondayOf(solveResp.horizon.start);
+    while (m <= solveResp.horizon.end) {
+      out.push(m);
+      m = addDays(m, 7);
+    }
+    return out;
+  }, [solveResp]);
+
+  // Land on the current week the first time a solve arrives.
+  useEffect(() => {
+    if (!initialWeekSet.current && mondays.length) {
+      const tm = mondayOf(today);
+      const idx = Math.max(0, mondays.findIndex((m) => m === tm));
+      setViewWeek(idx >= 0 ? idx : 0);
+      initialWeekSet.current = true;
+    }
+  }, [mondays, today]);
+
+  if (booting) return <div className="boot">Loading…</div>;
+  if (!user)
+    return (
+      <Login
+        onAuthed={(u) => {
+          setUser(u);
+          loadAll().catch((e) => setError(e instanceof Error ? e.message : String(e)));
+        }}
+      />
+    );
+
+  const safeWeek = Math.min(viewWeek, Math.max(0, mondays.length - 1));
+  const days = mondays.length ? weekDates(mondays[safeWeek]) : [];
+  const conflicts = (solveResp?.conflicts ?? []).filter(
+    (c) => !c.date || (days.length > 0 && c.date >= days[0] && c.date <= days[6])
+  );
 
   return (
     <div className="app">
       <Sidebar
-        calendars={BASE_CALENDARS}
-        calendarId={calendarId}
-        onSelectCalendar={loadCalendar}
-        calendarModes={calendar.modes ?? []}
+        user={user}
+        onLogout={logout}
         config={config}
-        setConfig={setConfig}
-        userModes={userModes}
-        setUserModes={setUserModes}
+        onConfigChange={changeConfig}
         intents={intents}
-        setIntents={setIntents}
-        intentLibrary={INTENT_LIBRARY}
-        onAddPreset={addPreset}
-        horizonWeeks={horizonWeeks}
-        setHorizonWeeks={(n) => {
-          setHorizonWeeks(n);
-          setViewWeek((w) => Math.min(w, n - 1));
+        onAddPreset={onAddPreset}
+        onAIAdd={aiAdd}
+        onEditIntent={(intent) => setEditing({ intent, isNew: false })}
+        onNewIntent={() => setEditing({ intent: blankIntent(), isNew: true })}
+        onDeleteIntent={deleteIntent}
+        modes={modes}
+        onAddMode={() => {
+          const start = solveResp?.horizon.start ?? mondayOf(today);
+          guard(api.createMode({ name: 'mode', span: [start, addDays(start, 6)] }).then(reload));
         }}
-        instanceCount={output?.instances.length ?? 0}
-        conflictCount={output?.conflicts.length ?? 0}
+        onUpdateMode={(id, mode) => guard(api.updateMode(id, mode).then(reload))}
+        onDeleteMode={(id) => guard(api.deleteMode(id).then(reload))}
+        intentLibrary={INTENT_LIBRARY}
+        feed={feed}
+        onRotateFeed={rotateFeed}
+        solveMs={solveResp?.solveMs ?? null}
+        instanceCount={solveResp?.instances.length ?? 0}
+        cached={solveResp?.cached ?? null}
+        conflictCount={solveResp?.conflicts.length ?? 0}
       />
 
       <div className="main">
         <div className="toolbar">
-          <button className="nav-btn" onClick={() => setViewWeek((w) => Math.max(0, w - 1))} disabled={safeViewWeek === 0}>
+          <button className="nav-btn" onClick={() => setViewWeek((w) => Math.max(0, w - 1))} disabled={safeWeek === 0}>
             ‹
           </button>
           <button
             className="nav-btn"
-            onClick={() => setViewWeek((w) => Math.min(horizonWeeks - 1, w + 1))}
-            disabled={safeViewWeek === horizonWeeks - 1}
+            onClick={() => setViewWeek((w) => Math.min(mondays.length - 1, w + 1))}
+            disabled={safeWeek >= mondays.length - 1}
           >
             ›
           </button>
-          <div className="week-label">{rangeLabel(days[0], days[6])}</div>
+          <div className="week-label">{days.length ? rangeLabel(days[0], days[6]) : '—'}</div>
           <span className="pill">
-            Week {safeViewWeek + 1} of {horizonWeeks}
+            Week {safeWeek + 1} of {mondays.length}
           </span>
           <div className="spacer" />
           <div className="legend">
-            <span><span className="swatch" style={{ background: '#eceff3', border: '1px solid #9aa3b2' }} />Fixed</span>
             <span><span className="swatch" style={{ background: 'hsl(210 70% 92%)', border: '1px solid hsl(210 65% 55%)' }} />Solved</span>
             <span>🌙 during sleep</span>
             <span><span className="swatch" style={{ background: '#fff', outline: '2px solid var(--danger)' }} />overlap</span>
@@ -138,23 +223,31 @@ export function App() {
 
         {error ? (
           <div className="conflict-banner">
-            <b>Couldn’t solve:</b> {error} — check your intent JSON.
+            <b>Error:</b> {error} <button className="btn tiny ghost" onClick={() => setError(null)}>dismiss</button>
           </div>
-        ) : conflictsThisWeek.length ? (
+        ) : conflicts.length ? (
           <div className="conflict-banner">
-            <b>{conflictsThisWeek.length} conflict{conflictsThisWeek.length > 1 ? 's' : ''} this week:</b>
+            <b>{conflicts.length} conflict{conflicts.length > 1 ? 's' : ''} this week:</b>
             <ul>
-              {conflictsThisWeek.slice(0, 6).map((c, i) => (
-                <li key={i}>
-                  [{c.kind}] {c.message}
-                </li>
+              {conflicts.slice(0, 6).map((c, i) => (
+                <li key={i}>[{c.kind}] {c.message}</li>
               ))}
             </ul>
           </div>
         ) : null}
 
-        <WeekCalendar days={days} fixed={fixed} instances={output?.instances ?? []} today={TODAY} />
+        <WeekCalendar days={days} fixed={NO_FIXED} instances={solveResp?.instances ?? []} today={today} />
       </div>
+
+      {editing ? (
+        <IntentEditor
+          key={editing.isNew ? 'new' : editing.intent.id}
+          initial={editing.intent}
+          isNew={editing.isNew}
+          onSave={saveEditing}
+          onCancel={() => setEditing(null)}
+        />
+      ) : null}
     </div>
   );
 }

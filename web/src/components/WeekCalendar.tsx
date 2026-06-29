@@ -19,11 +19,15 @@ interface DisplayEvent {
   _lane?: number;
   _lanes?: number;
   _overlap?: boolean;
+  /** Start of the next event in the same lane (or 1440) — bounds the drawn height
+   *  so a min-height tiny event never grows into its neighbour. */
+  _maxBottomMin?: number;
 }
 
 function layoutDay(evts: DisplayEvent[]): DisplayEvent[] {
+  // All geometry uses REAL times. A min *pixel* height keeps tiny events visible
+  // without distorting the schedule or causing false overlaps.
   const sorted = [...evts].sort((a, b) => a.startMin - b.startMin || a.endMin - b.endMin);
-  // pairwise overlap flag
   for (const e of sorted) {
     e._overlap = sorted.some((o) => o !== e && e.startMin < o.endMin && o.startMin < e.endMin);
   }
@@ -32,24 +36,24 @@ function layoutDay(evts: DisplayEvent[]): DisplayEvent[] {
   let cluster: DisplayEvent[] = [];
   let clusterEnd = -1;
   const flush = () => {
-    const laneEnds: number[] = [];
+    const lanes: DisplayEvent[][] = [];
     for (const e of cluster) {
       let placed = false;
-      for (let i = 0; i < laneEnds.length; i++) {
-        if (laneEnds[i] <= e.startMin) {
+      for (let i = 0; i < lanes.length; i++) {
+        if (lanes[i][lanes[i].length - 1].endMin <= e.startMin) {
           e._lane = i;
-          laneEnds[i] = e.endMin;
+          lanes[i].push(e);
           placed = true;
           break;
         }
       }
       if (!placed) {
-        e._lane = laneEnds.length;
-        laneEnds.push(e.endMin);
+        e._lane = lanes.length;
+        lanes.push([e]);
       }
     }
     for (const e of cluster) {
-      e._lanes = laneEnds.length;
+      e._lanes = lanes.length;
       out.push(e);
     }
     cluster = [];
@@ -60,8 +64,26 @@ function layoutDay(evts: DisplayEvent[]): DisplayEvent[] {
     clusterEnd = cluster.length === 1 ? e.endMin : Math.max(clusterEnd, e.endMin);
   }
   if (cluster.length) flush();
+
+  // The next event sharing an event's column bounds its drawn height — computed
+  // globally (across clusters) so a tiny event can't overflow the next block,
+  // even when they don't actually overlap in time.
+  const byLane = new Map<number, DisplayEvent[]>();
+  for (const e of out) {
+    const arr = byLane.get(e._lane!) ?? [];
+    arr.push(e);
+    byLane.set(e._lane!, arr);
+  }
+  for (const lane of byLane.values()) {
+    lane.sort((a, b) => a.startMin - b.startMin);
+    for (let i = 0; i < lane.length; i++) {
+      lane[i]._maxBottomMin = i + 1 < lane.length ? lane[i + 1].startMin : 1440;
+    }
+  }
   return out;
 }
+
+const MIN_EVT_PX = 15; // desired minimum height for readability
 
 export function WeekCalendar(props: {
   days: string[];
@@ -95,7 +117,7 @@ export function WeekCalendar(props: {
         subject: inst.subject,
         date: d,
         startMin: timeOfMin(inst.start),
-        endMin: Math.max(timeOfMin(inst.end), timeOfMin(inst.start) + 12),
+        endMin: timeOfMin(inst.end),
         kind: 'instance',
         intentId: inst.intentId,
         children: inst.children,
@@ -145,9 +167,14 @@ export function WeekCalendar(props: {
                 const lane = e._lane ?? 0;
                 const widthPct = 100 / lanes;
                 const col = e.kind === 'instance' ? colorFor(e.intentId ?? e.subject) : null;
+                // Real height, but at least MIN_EVT_PX for readability — clamped so
+                // it never overflows into the next event sharing this lane.
+                const realPx = (e.endMin - e.startMin) * PX;
+                const availablePx = ((e._maxBottomMin ?? 1440) - e.startMin) * PX - 1;
+                const height = Math.max(Math.min(Math.max(realPx - 1, MIN_EVT_PX), availablePx), 4);
                 const style: React.CSSProperties = {
                   top: e.startMin * PX,
-                  height: Math.max((e.endMin - e.startMin) * PX - 2, 14),
+                  height,
                   left: `calc(${lane * widthPct}% + 3px)`,
                   width: `calc(${widthPct}% - 6px)`,
                   ...(col ? { background: col.bg, borderLeftColor: col.border, color: col.text } : {}),

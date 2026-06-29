@@ -1,0 +1,25 @@
+name = "calendizer"
+main = "src/index.ts"
+compatibility_date = "2024-12-01"
+compatibility_flags = ["nodejs_compat"]
+
+# The Worker also serves the built frontend (web/dist) as static assets, with an
+# SPA fallback so client-side routes resolve to index.html.
+[assets]
+directory = "../web/dist"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "calendizer"
+database_id = "local-dev-placeholder" # replaced with a real id after `wrangler d1 create calendizer`
+migrations_dir = "migrations"
+
+[vars]
+OPENROUTER_MODEL = "deepseek/deepseek-v4-flash"
+
+# Secrets (set via .dev.vars locally, `wrangler secret put` in prod):
+#   AUTH_SECRET         - HMAC signing key for session tokens
+#   INVITE_CODE         - required to register
+#   OPENROUTER_API_KEY  - for /api/smart

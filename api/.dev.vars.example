@@ -1,0 +1,5 @@
+# Copy to api/.dev.vars for local `wrangler dev`. Set real values in production with
+# `wrangler secret put <NAME>`. This file is gitignored.
+AUTH_SECRET=change-me-to-a-long-random-string
+INVITE_CODE=your-signup-code
+OPENROUTER_API_KEY=sk-or-v1-...

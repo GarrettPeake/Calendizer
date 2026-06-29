@@ -57,29 +57,48 @@ out.conflicts; // constraints in tension, if any
 
 `renderICS(out.instances)` flattens the result into an ICS feed.
 
-## Playground (`web/`)
+## Backend (`api/` — Cloudflare Worker)
 
-A React + Vite app for messing about with the solver interactively. It imports the
-library **directly from `../src`** (via a `calendizer` alias) so it always runs the
-real engine.
+A Cloudflare Worker (Hono + D1) that persists each user's intents/modes/config,
+solves **on the backend over a rolling 12-month horizon** (cached, recomputed when
+inputs change, with compute-time metrics), publishes a secret ICS feed, and serves
+the frontend as static assets. Auth is invite-gated username/password (PBKDF2 +
+stateless HMAC bearer tokens). The AI endpoint runs server-side via OpenRouter
+(`deepseek/deepseek-v4-flash`).
 
 ```bash
-cd web
+cd api
 npm install
-npm run dev      # http://localhost:5173
+cp .dev.vars.example .dev.vars     # set AUTH_SECRET, INVITE_CODE, OPENROUTER_API_KEY
+npm run db:migrate                  # apply D1 schema locally
+cd ../web && npm install && npm run build   # build the SPA the Worker serves
+cd ../api && npm run dev            # http://localhost:8787 (API + SPA + feed)
 ```
 
-Features:
-- **Base-calendar library** — empty, busy professional, university student, family
-  logistics, and a vacation-mode week — loaded as the fixed events the solver routes
-  around.
-- **Intent library** — one-click presets (pottery, morning routine, medication,
-  stretching, Mai Tai, fishing, guitar, gym, deep work, reading); each can be tweaked,
-  or edit the whole intent set as raw JSON.
-- **Editable global config & modes** (wakeup/sleep, grid, padding, location, etc.).
-- **A week calendar** you navigate across weeks; fixed events and solved instances are
-  colour-coded, children and "placed during sleep" are shown, visual overlaps are
-  outlined, and conflicts surface in a banner. Everything re-solves live as you edit.
+Endpoints (all `/api/*` need a bearer token except register/login):
+
+| Group | Routes |
+|-------|--------|
+| Auth | `POST /api/auth/register` (invite-gated), `POST /api/auth/login`, `GET /api/auth/me` |
+| Config | `GET/PUT /api/config` |
+| Intents | `GET/POST /api/intents`, `GET/PUT/DELETE /api/intents/:id` |
+| Modes | `GET/POST /api/modes`, `PUT/DELETE /api/modes/:id` |
+| Smart | `POST /api/smart {query}` → parses + persists a new intent |
+| Solve | `GET /api/solve` (instances+conflicts, `X-Solve-Ms`), `GET /api/metrics` |
+| Feed | `GET /api/feed`, `POST /api/feed/rotate`, public `GET /feed/:secret.ics` |
+
+Deploy: create a D1 db (`wrangler d1 create calendizer`), put its id in
+`api/wrangler.toml`, set secrets (`wrangler secret put …`), `npm run db:migrate:remote`,
+then `wrangler deploy`.
+
+## Frontend (`web/`)
+
+A React + Vite SPA — an authenticated client of the Worker (no client-side solving;
+it renders what `GET /api/solve` returns). Log in/register, manage intents (form
+editor or one-click presets), describe events in natural language (→ `/api/smart`),
+edit config & modes, navigate the 12-month-solved week view, and copy/rotate the
+secret ICS feed URL. The Worker serves the built SPA in production; in dev, run
+`wrangler dev` (`:8787`) and `web` Vite (`:5173`, which proxies `/api` + `/feed`).
 
 ## Architecture (`src/`)
 
