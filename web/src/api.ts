@@ -85,6 +85,8 @@ export const api = {
   // smart
   smart: (query: string) =>
     req<{ intent: Intent; mode: ModeRecord | null; explanation: string }>('POST', '/smart', { query }),
+  smartEdit: (intent: Intent, instruction: string) =>
+    req<{ intent: Intent; updates: string; issues: string[] }>('POST', '/smart/edit', { intent, instruction }),
 
   // solve + metrics + feed
   solve: () => req<SolveResponse>('GET', '/solve'),

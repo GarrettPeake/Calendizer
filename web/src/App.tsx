@@ -246,6 +246,7 @@ export function App() {
           isNew={editing.isNew}
           onSave={saveEditing}
           onCancel={() => setEditing(null)}
+          onSmartEdit={(intent, instruction) => api.smartEdit(intent, instruction)}
         />
       ) : null}
     </div>

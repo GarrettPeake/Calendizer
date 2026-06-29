@@ -21,8 +21,35 @@ export function IntentEditor(props: {
   isNew: boolean;
   onSave: (intent: Intent) => void;
   onCancel: () => void;
+  onSmartEdit: (intent: Intent, instruction: string) => Promise<{ intent: Intent; updates: string; issues: string[] }>;
 }) {
   const [d, setD] = useState<Intent>(() => structuredClone(props.initial));
+
+  // Natural-language modify: proposes changes that populate the form for review.
+  const [instruction, setInstruction] = useState('');
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
+  const [aiSummary, setAiSummary] = useState<string | null>(null);
+  const [aiIssues, setAiIssues] = useState<string[]>([]);
+
+  async function applyInstruction() {
+    if (!instruction.trim() || aiBusy) return;
+    setAiBusy(true);
+    setAiError(null);
+    setAiSummary(null);
+    setAiIssues([]);
+    try {
+      const res = await props.onSmartEdit(d, instruction.trim());
+      setD(res.intent); // populate the form — NOT saved until the user clicks Save
+      setAiSummary(res.updates);
+      setAiIssues(res.issues);
+      setInstruction('');
+    } catch (e) {
+      setAiError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setAiBusy(false);
+    }
+  }
 
   const patch = (p: Partial<Intent>) => setD((cur) => ({ ...cur, ...p }));
   const patchWindow = (p: Partial<Intent['window']>) => setD((cur) => ({ ...cur, window: { ...cur.window, ...p } }));
@@ -49,6 +76,36 @@ export function IntentEditor(props: {
         </div>
 
         <div className="modal-body">
+          {/* Natural-language modify */}
+          <div className="ai-modify">
+            <div className="ai-modify-row">
+              <input
+                type="text"
+                placeholder='Modify with AI — e.g. "make it 4× a week in the mornings"'
+                value={instruction}
+                onChange={(e) => setInstruction(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    applyInstruction();
+                  }
+                }}
+              />
+              <button className="btn" type="button" onClick={applyInstruction} disabled={aiBusy || !instruction.trim()}>
+                {aiBusy ? '…' : 'Apply'}
+              </button>
+            </div>
+            {aiError ? <p className="ai-note err">{aiError}</p> : null}
+            {aiSummary ? <p className="ai-note ok">✎ {aiSummary} <span className="ai-hint">— review below, then Save</span></p> : null}
+            {aiIssues.length ? (
+              <ul className="ai-issues">
+                {aiIssues.map((iss, i) => (
+                  <li key={i}>⚠ {iss}</li>
+                ))}
+              </ul>
+            ) : null}
+          </div>
+
           {/* Basics */}
           <Group title="Basics">
             <Field label="Subject">

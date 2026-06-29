@@ -5,7 +5,7 @@ import type { GlobalConfig, Intent, Mode } from '../../src/index';
 import { hashPassword, verifyPassword, signToken, verifyToken } from './auth';
 import * as repo from './repo';
 import { getSolved } from './solveService';
-import { parseSmart } from './smart';
+import { parseSmart, parseSmartEdit } from './smart';
 
 const app = new Hono<{ Bindings: Env; Variables: Vars }>();
 
@@ -171,6 +171,27 @@ app.post('/api/smart', requireAuth, async (c) => {
   }
   await invalidate(c);
   return c.json({ intent, mode, explanation: parsed.explanation }, 201);
+});
+
+// Propose an edit to an intent from a natural-language instruction. Does NOT
+// persist — returns the updated intent to populate the editor for review, plus a
+// summary and any parts of the request that could not be represented.
+app.post('/api/smart/edit', requireAuth, async (c) => {
+  const body = (await c.req.json().catch(() => ({}))) as { intent?: Intent; instruction?: string };
+  if (!body.intent || !body.instruction?.trim()) return c.json({ error: 'intent and instruction are required' }, 400);
+
+  const config = await repo.getConfig(c.env.DB, c.get('userId'));
+  const today = new Date(Date.now() + (config.utcOffsetMinutes ?? 0) * 60_000).toISOString().slice(0, 10);
+  try {
+    const result = await parseSmartEdit(c.env, body.intent, body.instruction.trim(), {
+      today,
+      wakeup: String(config.wakeup),
+      sleep: String(config.sleep),
+    });
+    return c.json(result);
+  } catch (e) {
+    return c.json({ error: e instanceof Error ? e.message : String(e) }, 502);
+  }
 });
 
 /* --------------------------------- solve + metrics --------------------------------- */
