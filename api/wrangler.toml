@@ -13,7 +13,7 @@ not_found_handling = "single-page-application"
 [[d1_databases]]
 binding = "DB"
 database_name = "calendizer"
-database_id = "local-dev-placeholder" # replaced with a real id after `wrangler d1 create calendizer`
+database_id = "f98d2bd0-9696-4e7e-99e7-85a5d5b07b59"
 migrations_dir = "migrations"
 
 [vars]
