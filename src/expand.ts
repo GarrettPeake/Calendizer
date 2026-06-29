@@ -30,6 +30,20 @@ export interface Slot {
   /** Number of occurrences sharing this date (for spread within the day). */
   perDayCount: number;
   uid: string;
+  /**
+   * True when the day was chosen by the solver (a `days.count` or flat-quota
+   * floor) rather than pinned by the user. Such occurrences may spill to another
+   * day in `bucketDates` if their chosen day is full, instead of overlapping.
+   */
+  flexibleDay: boolean;
+  /** Candidate days in this slot's bucket, used for spillover. */
+  bucketDates?: ISODate[];
+  /**
+   * An "aspiration" occurrence above the guaranteed floor (fillToMax). It is
+   * placed only if a clean, non-overlapping slot exists, and dropped otherwise —
+   * never forced and never reported as a conflict.
+   */
+  optional?: boolean;
 }
 
 /** Choose `k` items from a list, spread as evenly as possible. Deterministic. */
@@ -79,7 +93,8 @@ function mergeIntervalBuckets(orderedKeys: string[], interval: number): Map<stri
 export function expandIntent(
   intent: Intent,
   horizonDates: ISODate[],
-  modes: Mode[]
+  modes: Mode[],
+  fillToMax = false
 ): Slot[] {
   const intentId = intent.id ?? slugify(intent.subject);
   const card = intent.cardinality;
@@ -118,12 +133,16 @@ export function expandIntent(
 
   const slots: Slot[] = [];
 
+  // A day chosen by a `days.count` selection (or flat quota) is flexible: under
+  // contention it may spill to another day in its bucket rather than overlap.
+  const isCountDays = !!card.days && 'count' in card.days;
+
   // Flat quota: no day/per_day selection but a total floor → spread across span.
   if (!hasNestedSelection && totalMin && totalMin > 0) {
     const allDates = candidates;
     const chosen = spreadPick(allDates, totalMin);
     chosen.forEach((date, i) => {
-      slots.push(makeSlot(intentId, intent.subject, date, 'span', i, 1));
+      slots.push(makeSlot(intentId, intent.subject, date, 'span', i, 1, true, allDates));
     });
   } else {
     // 3. Per-bucket day selection.
@@ -132,16 +151,39 @@ export function expandIntent(
       const chosenDays = chooseDays(days, card);
       chosenDays.forEach((date) => {
         for (let p = 0; p < perDayCount; p++) {
-          slots.push(makeSlot(intentId, intent.subject, date, key, p, perDayCount));
+          slots.push(
+            makeSlot(intentId, intent.subject, date, key, p, perDayCount, isCountDays, isCountDays ? days : undefined)
+          );
         }
       });
+
+      // fillToMax: add aspiration days toward the count's max, spread across the
+      // days the floor didn't claim. They are placed only if a clean slot exists.
+      if (fillToMax && isCountDays) {
+        const [mn, mx] = (card.days as { count: [number, number] }).count;
+        const cap = mx == null ? days.length : mx;
+        const extra = cap - Math.max(mn, chosenDays.length);
+        if (extra > 0) {
+          const remaining = days.filter((d) => !chosenDays.includes(d));
+          for (const date of spreadPick(remaining, extra)) {
+            for (let p = 0; p < perDayCount; p++) {
+              const s = makeSlot(intentId, intent.subject, date, key, p, perDayCount, true, days);
+              s.optional = true;
+              slots.push(s);
+            }
+          }
+        }
+      }
     }
   }
 
-  // 4. Apply lifetime total cap (max terminates recurrence).
+  // 4. Apply lifetime total cap (max terminates recurrence). Drop aspiration
+  // (optional) occurrences before any guaranteed (required) ones.
   let result = slots;
   if (totalMax != null && result.length > totalMax) {
-    result = result.slice(0, totalMax);
+    const required = result.filter((s) => !s.optional);
+    const optional = result.filter((s) => s.optional);
+    result = required.concat(optional).slice(0, totalMax);
   }
   // Ensure a flat floor is met even when nested selection underfills.
   if (totalMin != null && result.length < totalMin && candidates.length > 0) {
@@ -150,7 +192,7 @@ export function expandIntent(
     const free = candidates.filter((d) => !usedDates.has(d));
     const extra = spreadPick(free.length ? free : candidates, extraNeeded);
     extra.forEach((date, i) =>
-      result.push(makeSlot(intentId, intent.subject, date, 'floor', i, 1))
+      result.push(makeSlot(intentId, intent.subject, date, 'floor', i, 1, true, candidates))
     );
   }
 
@@ -181,7 +223,9 @@ function makeSlot(
   date: ISODate,
   bucketKey: string,
   perDayIndex: number,
-  perDayCount: number
+  perDayCount: number,
+  flexibleDay = false,
+  bucketDates?: ISODate[]
 ): Slot {
   return {
     intentId,
@@ -191,6 +235,8 @@ function makeSlot(
     perDayIndex,
     perDayCount,
     uid: `${intentId}|${bucketKey}|${perDayIndex}`,
+    flexibleDay,
+    bucketDates,
   };
 }
 

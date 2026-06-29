@@ -99,6 +99,14 @@ export interface GlobalConfig {
   min_break: number;
   /** Longest continuous run of activity before a break is wanted (minutes). */
   max_block: number;
+  /**
+   * When true, the solver fills flexible `days.count` ranges toward their `max`:
+   * after guaranteeing the floor it adds the extra occurrences (spread across the
+   * remaining days) wherever a clean, non-overlapping slot exists. Default false
+   * (place exactly the floor). The `max` is still only an aspiration — extras are
+   * never forced into an overlap.
+   */
+  fillToMax?: boolean;
 }
 
 /** An event already on the calendar (fixed, user-authored, immovable). */

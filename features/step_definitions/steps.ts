@@ -63,6 +63,10 @@ Given('the maximum block is {int} minutes', function (this: CalendizerWorld, m: 
   this.config.max_block = m;
 });
 
+Given('fill toward max is enabled', function (this: CalendizerWorld) {
+  this.config.fillToMax = true;
+});
+
 Given('the planning horizon is {string} to {string}', function (this: CalendizerWorld, a: string, b: string) {
   this.horizon = { start: a, end: b };
 });
