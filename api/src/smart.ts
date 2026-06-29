@@ -103,6 +103,8 @@ export async function parseSmart(
     body: JSON.stringify({
       model,
       temperature: 0,
+      // Route to the highest-throughput provider for this model.
+      provider: { sort: 'throughput' },
       messages: [
         { role: 'system', content: SYSTEM_PROMPT },
         { role: 'user', content: userMsg },
