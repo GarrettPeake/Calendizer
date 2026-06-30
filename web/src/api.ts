@@ -88,6 +88,10 @@ export const api = {
   smartEdit: (intent: Intent, instruction: string) =>
     req<{ intent: Intent; updates: string; issues: string[] }>('POST', '/smart/edit', { intent, instruction }),
 
+  // geo (IP-based, no browser prompt)
+  geo: () =>
+    req<{ lat?: number; lon?: number; city?: string; region?: string; country?: string; timezone?: string }>('GET', '/geo'),
+
   // solve + metrics + feed
   solve: () => req<SolveResponse>('GET', '/solve'),
   metrics: () => req<MetricsResponse>('GET', '/metrics'),

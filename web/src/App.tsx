@@ -8,7 +8,7 @@ import { IntentEditor, blankIntent } from './components/IntentEditor';
 import { ModeEditor } from './components/ModeEditor';
 import { ThemeToggle, type Theme } from './components/ThemeToggle';
 import { DetectBanner } from './components/DetectBanner';
-import { buildProposal, detectEnvironment, type Detected } from './lib/detect';
+import { buildProposal, detectTimezone, type Detected } from './lib/detect';
 import { addDays, mondayOf, rangeLabel, weekDates } from './lib/dates';
 
 const NO_FIXED: never[] = [];
@@ -106,13 +106,25 @@ export function App() {
     setConfigState(next);
   }
 
-  /* ---------------- detect timezone/location from the browser ---------------- */
+  /* ---------------- detect timezone (browser) + location (server IP geo) ---------------- */
   useEffect(() => {
     if (!user) return;
-    detectEnvironment().then(setDetected);
-    const onFocus = () => detectEnvironment().then(setDetected);
-    window.addEventListener('focus', onFocus);
-    return () => window.removeEventListener('focus', onFocus);
+    const run = async () => {
+      const tz = detectTimezone();
+      let lat: number | undefined;
+      let lon: number | undefined;
+      try {
+        const g = await api.geo();
+        lat = g.lat;
+        lon = g.lon;
+      } catch {
+        /* geo unavailable — timezone still detected */
+      }
+      setDetected({ ...tz, lat, lon });
+    };
+    run();
+    window.addEventListener('focus', run);
+    return () => window.removeEventListener('focus', run);
   }, [user]);
 
   const geoProposal = useMemo(() => (config && detected ? buildProposal(config, detected) : null), [config, detected]);

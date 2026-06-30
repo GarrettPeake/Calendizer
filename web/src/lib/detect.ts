@@ -1,5 +1,6 @@
-// Detect the user's timezone (exact, no permission) and approximate location
-// (via the Geolocation API) from the browser, and diff against the stored config.
+// Detect the user's timezone from the browser's own clock (exact, no permission).
+// Approximate location comes from the server's IP-based geo (Cloudflare request.cf)
+// via /api/geo — no browser location prompt. Diff both against the stored config.
 import type { GlobalConfig } from 'calendizer';
 
 export interface Detected {
@@ -9,22 +10,8 @@ export interface Detected {
   lon?: number;
 }
 
-const round2 = (n: number) => Math.round(n * 100) / 100;
-
-function getPosition(): Promise<{ lat: number; lon: number } | null> {
-  return new Promise((resolve) => {
-    if (!('geolocation' in navigator)) return resolve(null);
-    navigator.geolocation.getCurrentPosition(
-      (p) => resolve({ lat: round2(p.coords.latitude), lon: round2(p.coords.longitude) }),
-      () => resolve(null),
-      // A long maximumAge means a focus re-check reuses a cached fix instead of
-      // re-prompting after the user has already decided.
-      { timeout: 8000, maximumAge: 3_600_000 }
-    );
-  });
-}
-
-export async function detectEnvironment(): Promise<Detected> {
+/** Timezone from the browser clock — synchronous, no permission. */
+export function detectTimezone(): { utcOffsetMinutes: number; tzName: string } {
   const utcOffsetMinutes = -new Date().getTimezoneOffset(); // east-of-UTC positive
   let tzName = '';
   try {
@@ -32,8 +19,7 @@ export async function detectEnvironment(): Promise<Detected> {
   } catch {
     /* ignore */
   }
-  const loc = await getPosition();
-  return { utcOffsetMinutes, tzName, lat: loc?.lat, lon: loc?.lon };
+  return { utcOffsetMinutes, tzName };
 }
 
 export interface GeoChange {

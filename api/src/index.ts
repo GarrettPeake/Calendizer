@@ -217,6 +217,22 @@ app.post('/api/smart/edit', requireAuth, async (c) => {
   }
 });
 
+/* --------------------------------- geo (IP-based, no browser prompt) --------------------------------- */
+
+app.get('/api/geo', requireAuth, (c) => {
+  const cf = ((c.req.raw as any).cf ?? {}) as { latitude?: string; longitude?: string; city?: string; region?: string; country?: string; timezone?: string };
+  const lat = cf.latitude != null ? Math.round(parseFloat(cf.latitude) * 100) / 100 : undefined;
+  const lon = cf.longitude != null ? Math.round(parseFloat(cf.longitude) * 100) / 100 : undefined;
+  return c.json({
+    lat: Number.isFinite(lat) ? lat : undefined,
+    lon: Number.isFinite(lon) ? lon : undefined,
+    city: cf.city,
+    region: cf.region,
+    country: cf.country,
+    timezone: cf.timezone,
+  });
+});
+
 /* --------------------------------- solve + metrics --------------------------------- */
 
 app.get('/api/solve', requireAuth, async (c) => {
