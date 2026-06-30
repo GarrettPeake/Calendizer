@@ -26,7 +26,7 @@ export function ModeEditor(props: {
         <div className="modal-body">
           <label className="edit-field">
             <span>Name</span>
-            <input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. vacation" autoFocus />
+            <input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Bahamas Cruise" autoFocus />
           </label>
           <div className="grid2">
             <label className="edit-field">
@@ -39,7 +39,7 @@ export function ModeEditor(props: {
             </label>
           </div>
           <p className="hint-cell">
-            During this span, intents set to this mode (plus “all”) are active and “default” intents are suppressed.
+            During this span, only intents set to this mode (plus “all”) are active
           </p>
         </div>
         <div className="modal-foot">

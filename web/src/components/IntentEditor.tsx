@@ -91,7 +91,7 @@ export function IntentEditor(props: {
             <div className="ai-modify-row">
               <input
                 type="text"
-                placeholder='Modify with AI — e.g. "make it 4× a week in the mornings"'
+                placeholder='Modify with AI — e.g. "make it 4x a week in the mornings"'
                 value={instruction}
                 onChange={(e) => setInstruction(e.target.value)}
                 onKeyDown={(e) => {
@@ -102,11 +102,11 @@ export function IntentEditor(props: {
                 }}
               />
               <button className="btn" type="button" onClick={applyInstruction} disabled={aiBusy || !instruction.trim()}>
-                {aiBusy ? '…' : 'Apply'}
+                {aiBusy ? 'Processing…' : 'Apply'}
               </button>
             </div>
             {aiError ? <p className="ai-note err">{aiError}</p> : null}
-            {aiSummary ? <p className="ai-note ok">{aiSummary} <span className="ai-hint">— review below, then Save</span></p> : null}
+            {aiSummary ? <p className="ai-note ok">{aiSummary} <span className="ai-hint">— review below, then save</span></p> : null}
             {aiIssues.length ? (
               <ul className="ai-issues">
                 {aiIssues.map((iss, i) => (
@@ -118,14 +118,14 @@ export function IntentEditor(props: {
 
           {/* Basics */}
           <Group title="Basics">
-            <Field label="Subject">
+            <Field label="Name">
               <input type="text" value={d.subject} onChange={(e) => patch({ subject: e.target.value })} />
             </Field>
-            <div className="grid3">
+            <div className="grid2">
               <Field label="Mode">
                 <select value={modeValue} onChange={(e) => patch({ mode: e.target.value })}>
-                  <option value="default">default</option>
-                  <option value="all">all (every mode)</option>
+                  <option value="default">normal</option>
+                  <option value="all">all (happens in every mode)</option>
                   {props.modes.map((m) => (
                     <option key={m.id} value={m.id}>
                       {m.name}
@@ -137,56 +137,54 @@ export function IntentEditor(props: {
               <Field label="Priority">
                 <input type="number" value={d.priority} onChange={(e) => patch({ priority: Number(e.target.value) })} />
               </Field>
-              <div />
             </div>
-            <div className="grid3">
-              <Field label="Duration min (m)">
+            <div className="grid2">
+              <Field label="Min duration (m)">
                 <input
                   type="number"
                   value={d.duration[0]}
                   onChange={(e) => patch({ duration: [Number(e.target.value), d.duration[1]] })}
                 />
               </Field>
-              <Field label="Duration max (m)">
+              <Field label="Max duration (m)">
                 <input
                   type="number"
                   value={d.duration[1]}
                   onChange={(e) => patch({ duration: [d.duration[0], Number(e.target.value)] })}
                 />
               </Field>
-              <div className="hint-cell">min = max ⇒ fixed length</div>
             </div>
           </Group>
 
           {/* Window */}
-          <Group title="Window — when an occurrence may sit">
+          <Group title="Timing (when an occurrences are placed)">
             <TimeValueField
-              label="not before"
+              label="Can't start before"
               value={d.window.not_before}
               onChange={(v) => patchWindow({ not_before: v })}
             />
             <TimeValueField
-              label="not after"
+              label="Can't end after"
               value={d.window.not_after}
               onChange={(v) => patchWindow({ not_after: v })}
             />
             <TimeValueField
-              label="starts at (pin)"
+              label="Starts exactly at (pin)"
               value={d.window.starts_at}
               onChange={(v) => patchWindow({ starts_at: v })}
             />
             {d.window.overrides ? (
               <div className="hint-cell">
-                Has per-weekday overrides ({Object.keys(d.window.overrides).join('; ')}) — preserved; edit via JSON for fine control.
+                Has per-weekday overrides ({Object.keys(d.window.overrides).join('; ')}) — preserved
               </div>
             ) : null}
           </Group>
 
           {/* Cardinality */}
-          <Group title="Cardinality — how many & how often">
+          <Group title="Scheduling (how many & how often)">
             {/* Period */}
-            <div className="grid3">
-              <Field label="Period unit">
+            <div className="grid2">
+              <Field label="Time period to spread occurences in">
                 <select
                   value={card.period?.unit ?? 'none'}
                   onChange={(e) => {
@@ -195,14 +193,14 @@ export function IntentEditor(props: {
                     else patchCard({ period: { unit: u as any, interval: card.period?.interval ?? 1 } });
                   }}
                 >
-                  <option value="none">— none —</option>
-                  <option value="day">day</option>
-                  <option value="week">week</option>
-                  <option value="month">month</option>
-                  <option value="mode">mode</option>
+                  <option value="none">One time</option>
+                  <option value="day">Day</option>
+                  <option value="week">Week</option>
+                  <option value="month">Month</option>
+                  <option value="mode">Calendar Mode</option>
                 </select>
               </Field>
-              <Field label="Interval">
+              <Field label="">
                 <input
                   type="number"
                   min={1}
@@ -213,11 +211,10 @@ export function IntentEditor(props: {
                   }
                 />
               </Field>
-              <div />
             </div>
 
             {/* Days */}
-            <Field label="Days selection">
+            <Field label="What days?">
               <select
                 value={daysKind}
                 onChange={(e) => {
@@ -229,15 +226,15 @@ export function IntentEditor(props: {
                 }}
               >
                 <option value="none">— none —</option>
-                <option value="count">count (solver picks, spread)</option>
-                <option value="weekdays">specific weekdays</option>
-                <option value="dates">specific dates</option>
+                <option value="count">Count, spread across the period</option>
+                <option value="weekdays">Specific weekdays</option>
+                <option value="dates">Specific dates</option>
               </select>
             </Field>
 
             {daysKind === 'count' && card.days && 'count' in card.days ? (
-              <div className="grid3">
-                <Field label="min days">
+              <div className="grid2">
+                <Field label="Min days">
                   <input
                     type="number"
                     value={card.days.count[0]}
@@ -246,7 +243,7 @@ export function IntentEditor(props: {
                     }
                   />
                 </Field>
-                <Field label="max days">
+                <Field label="Max days">
                   <input
                     type="number"
                     value={card.days.count[1]}
@@ -255,12 +252,11 @@ export function IntentEditor(props: {
                     }
                   />
                 </Field>
-                <div className="hint-cell">per period bucket</div>
               </div>
             ) : null}
 
             {daysKind === 'weekdays' && card.days && 'weekdays' in card.days ? (
-              <Field label="weekdays">
+              <Field label="">
                 <div className="toggle-row">
                   {WEEKDAYS.map((w) => {
                     const on = (card.days as any).weekdays.includes(w);
@@ -285,7 +281,7 @@ export function IntentEditor(props: {
             ) : null}
 
             {daysKind === 'dates' && card.days && 'dates' in card.days ? (
-              <Field label="dates (comma-separated YYYY-MM-DD)">
+              <Field label="Dates (YYYY-MM-DD format, separate multiple with commas)">
                 <input
                   type="text"
                   value={(card.days as any).dates.join(', ')}
@@ -311,26 +307,25 @@ export function IntentEditor(props: {
                   checked={!!card.per_day}
                   onChange={(e) => patchCard({ per_day: e.target.checked ? { count: [1, 1] } : undefined })}
                 />
-                stack multiple per day (per_day)
+                Schedule multiple per day
               </label>
             </Field>
             {card.per_day ? (
-              <div className="grid3">
-                <Field label="per-day min">
+              <div className="grid2">
+                <Field label="Min">
                   <input
                     type="number"
                     value={card.per_day.count[0]}
                     onChange={(e) => patchCard({ per_day: { count: [Number(e.target.value), card.per_day!.count[1]] } })}
                   />
                 </Field>
-                <Field label="per-day max">
+                <Field label="Max">
                   <input
                     type="number"
                     value={card.per_day.count[1]}
                     onChange={(e) => patchCard({ per_day: { count: [card.per_day!.count[0], Number(e.target.value)] } })}
                   />
                 </Field>
-                <div />
               </div>
             ) : null}
 
@@ -342,12 +337,12 @@ export function IntentEditor(props: {
                   checked={!!card.total}
                   onChange={(e) => patchCard({ total: e.target.checked ? [null, null] : undefined })}
                 />
-                lifetime total bound
+                Limit total occurences
               </label>
             </Field>
             {card.total ? (
-              <div className="grid3">
-                <Field label="total min (blank = none)">
+              <div className="grid2">
+                <Field label="Min (leave blank for no min)">
                   <input
                     type="text"
                     value={card.total[0] ?? ''}
@@ -356,7 +351,7 @@ export function IntentEditor(props: {
                     }
                   />
                 </Field>
-                <Field label="total max (blank = ∞)">
+                <Field label="Max (leave blank for ∞)">
                   <input
                     type="text"
                     value={card.total[1] ?? ''}
@@ -365,13 +360,12 @@ export function IntentEditor(props: {
                     }
                   />
                 </Field>
-                <div />
               </div>
             ) : null}
           </Group>
 
           {/* Children */}
-          <Group title="Children — ordered sub-events that tile the block">
+          <Group title="Children (break it down into smaller items)">
             <Field label="">
               <label className="chk">
                 <input
@@ -388,11 +382,15 @@ export function IntentEditor(props: {
                     })
                   }
                 />
-                has children
+                Has children
               </label>
             </Field>
             {d.children ? (
               <>
+                <div className="hint-cell">
+                  Children fill the block in order, no gaps. Must keep at least one “fill” child and fixed children
+                  must sum to at most the min duration.
+                </div>
                 {d.children.map((c, i) => {
                   const isWeight = 'weight' in c;
                   return (
@@ -400,7 +398,7 @@ export function IntentEditor(props: {
                       <input
                         type="text"
                         value={c.subject}
-                        placeholder="subject"
+                        placeholder="Name"
                         onChange={(e) =>
                           patch({ children: d.children!.map((x, j) => (j === i ? { ...x, subject: e.target.value } : x)) })
                         }
@@ -420,8 +418,8 @@ export function IntentEditor(props: {
                           });
                         }}
                       >
-                        <option value="duration">fixed (min)</option>
-                        <option value="weight">weight</option>
+                        <option value="duration">Fixed time (min)</option>
+                        <option value="weight">Fill (weight)</option>
                       </select>
                       <input
                         type="number"
@@ -453,10 +451,6 @@ export function IntentEditor(props: {
                 >
                   + add child
                 </button>
-                <div className="hint-cell">
-                  Children fill the block in order, no gaps. Keep ≥1 “weight” child so it always tiles exactly; fixed
-                  durations must sum ≤ duration min.
-                </div>
               </>
             ) : null}
           </Group>
@@ -486,36 +480,38 @@ function TimeValueField(props: { label: string; value: TimeValue | undefined; on
   return (
     <div className="tv-row">
       <div className="tv-label">{props.label}</div>
-      <select
-        value={kind}
-        onChange={(e) => {
-          const k = e.target.value;
-          if (k === 'none') props.onChange(undefined);
-          else if (k === 'clock') props.onChange('09:00');
-          else props.onChange({ marker: k as Marker, offset_min: 0 });
-        }}
-      >
-        <option value="none">— unset —</option>
-        <option value="clock">clock time</option>
-        {MARKERS.map((m) => (
-          <option key={m} value={m}>
-            {m}
-          </option>
-        ))}
-      </select>
-      {kind === 'clock' ? (
-        <input type="text" value={clock} placeholder="HH:MM" onChange={(e) => props.onChange(e.target.value)} />
-      ) : kind !== 'none' ? (
-        <input
-          type="number"
-          value={offset}
-          title="offset minutes"
-          onChange={(e) => props.onChange({ marker: kind as Marker, offset_min: Number(e.target.value) })}
-        />
-      ) : (
-        <div />
-      )}
-      {kind !== 'none' && kind !== 'clock' ? <span className="tv-suffix">±min</span> : null}
+      <div className="tv-controls">
+        <select
+          value={kind}
+          onChange={(e) => {
+            const k = e.target.value;
+            if (k === 'none') props.onChange(undefined);
+            else if (k === 'clock') props.onChange('09:00');
+            else props.onChange({ marker: k as Marker, offset_min: 0 });
+          }}
+        >
+          <option value="none">— unset —</option>
+          <option value="clock">clock time</option>
+          {MARKERS.map((m) => (
+            <option key={m} value={m}>
+              {m}
+            </option>
+          ))}
+        </select>
+        {kind === 'clock' ? (
+          <input type="text" value={clock} placeholder="HH:MM" onChange={(e) => props.onChange(e.target.value)} />
+        ) : kind !== 'none' ? (
+          <>
+            <input
+              type="number"
+              value={offset}
+              title="offset minutes"
+              onChange={(e) => props.onChange({ marker: kind as Marker, offset_min: Number(e.target.value) })}
+            />
+            <span className="tv-suffix">±min</span>
+          </>
+        ) : null}
+      </div>
     </div>
   );
 }

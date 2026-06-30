@@ -1,6 +1,6 @@
 import type { GlobalConfig, Intent } from 'calendizer';
 import type { FeedInfo, ModeRecord, User } from '../api';
-import { colorFor } from '../lib/colors';
+import { colorFor, modeColor } from '../lib/colors';
 import { rangeLabel } from '../lib/dates';
 import { slug, summarize } from '../lib/intentMeta';
 import { CITIES, findCity, tzOffsetMinutes } from '../data/cities';
@@ -57,11 +57,11 @@ export function Sidebar(p: Props) {
       <div className="section">
         <SectionHeader
           icon={<ListIcon />}
-          title={`Active intents (${p.intents.length})`}
-          hint="Your scheduling intents. Click one to edit it; the calendar re-solves on every change."
+          title={`${p.intents.length} Active intents`}
+          hint="The things you intend to do. Click one to edit it."
         />
         {p.intents.length === 0 ? (
-          <p className="empty-hint">No intents yet — add one above or describe an event.</p>
+          <p className="empty-hint">What do you intend to get done?</p>
         ) : (
           p.intents.map((intent) => {
             const col = colorFor(intent.id ?? slug(intent.subject));
@@ -94,14 +94,15 @@ export function Sidebar(p: Props) {
       <div className="section">
         <SectionHeader
           icon={<LayersIcon />}
-          title="Modes"
-          hint="Named date spans (e.g. a vacation) that swap which intents are active during them."
+          title="Calendar Modes"
+          hint="Time ranges that behave differently, like a vacation. Intents are mode-specific or global, so you won't be scheduled to sip Mai Tais at the beach during a normal week, only during vacation mode."
         />
         {p.modes.length === 0 ? (
-          <p className="empty-hint">No modes. Add one to clear or swap intents over a date span.</p>
+          <p className="empty-hint">Time to plan a vacation?</p>
         ) : (
           p.modes.map((m) => (
             <div className="intent-row clickable" key={m.id} onClick={() => p.onEditMode(m)} title="Click to edit">
+              <span className="dot" style={{ background: modeColor(m.id).chip }} />
               <div className="meta">
                 <div className="s">{m.name}</div>
                 <div className="sub">{rangeLabel(m.span[0], m.span[1])}</div>
@@ -143,27 +144,27 @@ function ConfigCard({ config, onChange }: { config: GlobalConfig; onChange: (c: 
     <div className="section">
       <SectionHeader
         icon={<SlidersIcon />}
-        title="Global config"
-        hint="Solver-wide settings applied to every intent. Hover each field for what it affects."
+        title="Calendar config"
+        hint="Settings applied to your whole calendar, hover over each to see what it does"
       />
       <div className="card">
         <div className="row">
-          <Text label="wakeup" value={String(config.wakeup)} onChange={(v) => set({ wakeup: v })} hint="Your wake time (HH:MM). Resolves the 'wakeup' marker used in windows." />
-          <Text label="sleep" value={String(config.sleep)} onChange={(v) => set({ sleep: v })} hint="Your bedtime (HH:MM). Resolves the 'sleep' marker and acts as a nightly blackout the solver avoids unless an event can only run then." />
+          <Text label="Wakeup time" value={String(config.wakeup)} onChange={(v) => set({ wakeup: v })} hint="Your wake time (HH:MM). Useful to schedule intents for 'wakeup' or 'wakeup + 15m'" />
+          <Text label="Bedtime" value={String(config.sleep)} onChange={(v) => set({ sleep: v })} hint="Your bedtime (HH:MM). Useful to schedule intents for 'bedtime - 30m'" />
         </div>
         <div className="row">
-          <Num label="grid (min)" value={config.grid} onChange={(v) => set({ grid: v })} hint="Start-time resolution: occurrence starts snap to this many minutes (no 3:57 starts)." />
-          <Num label="padding (min)" value={config.padding} onChange={(v) => set({ padding: v })} hint="Minimum buffer enforced between placed occurrences." />
+          <Num label="Time grid (min)" value={config.grid} onChange={(v) => set({ grid: v })} hint="Events snap to this many minutes (i.e. no 3:57 starts)" />
+          <Num label="Padding (min)" value={config.padding} onChange={(v) => set({ padding: v })} hint="Minimum buffer enforced between events" />
         </div>
         <div className="row">
-          <Num label="min break" value={config.min_break} onChange={(v) => set({ min_break: v })} hint="Shortest gap that counts as a real break; smaller gaps are avoided as slivers." />
-          <Num label="max block" value={config.max_block} onChange={(v) => set({ max_block: v })} hint="Longest continuous run of activity before a break is wanted." />
+          <Num label="Min break" value={config.min_break} onChange={(v) => set({ min_break: v })} hint={'Shortest gap that counts as a real "break," anything smaller is avoided so the calendar flows smoothly'} />
+          <Num label="Max block" value={config.max_block} onChange={(v) => set({ max_block: v })} hint="Longest continuous run of events before a break is wanted" />
         </div>
         <label
           className="field"
-          title="Sets your coordinates (for sunrise/sunset markers) and timezone offset. Auto-detected from your IP; change it here to override."
+          title="Sets your rough location which allows scheduling things for sunrise/sunset. Also needed to compute your timezone offset. Auto-detected from your IP; change it here to override"
         >
-          <span>city</span>
+          <span>City</span>
           <select
             value={config.city ?? ''}
             onChange={(e) => {
@@ -171,7 +172,7 @@ function ConfigCard({ config, onChange }: { config: GlobalConfig; onChange: (c: 
               if (c) set({ city: c.name, location: { lat: c.lat, lon: c.lon }, utcOffsetMinutes: tzOffsetMinutes(c.tz) });
             }}
           >
-            {!config.city ? <option value="">Select a city…</option> : null}
+            {!config.city ? <option value="">When is your sunset?</option> : null}
             {config.city && !findCity(config.city) ? <option value={config.city}>{config.city} (detected)</option> : null}
             {CITIES.map((c) => (
               <option key={c.name} value={c.name}>
@@ -183,10 +184,10 @@ function ConfigCard({ config, onChange }: { config: GlobalConfig; onChange: (c: 
         <label
           className="chk"
           style={{ marginTop: 8, color: 'var(--muted)' }}
-          title="When there's room, schedule up to the max of a range (e.g. 3–5×/week → 5) and split a contended window's flexible durations by priority. Off = always the guaranteed minimum."
+          title="Always try to schedule the max of a range. An intent 3-5 times a week will schedule 5 times, or an intent that's 2-3 hours long will schedule for 3hours if there's space."
         >
           <input type="checkbox" checked={config.fillToMax ?? false} onChange={(e) => set({ fillToMax: e.target.checked })} />
-          Fill ranges toward max
+          Maximize events
         </label>
       </div>
     </div>

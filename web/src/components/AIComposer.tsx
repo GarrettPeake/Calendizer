@@ -17,7 +17,7 @@ export function AIComposer(props: { onSubmit: (text: string) => Promise<{ explan
     setNote(null);
     try {
       const r = await props.onSubmit(text.trim());
-      setNote(r.explanation || 'Added.');
+      setNote(r.explanation || 'Added');
       setText('');
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -30,13 +30,13 @@ export function AIComposer(props: { onSubmit: (text: string) => Promise<{ explan
     <div className="section">
       <SectionHeader
         icon={<WandIcon />}
-        title="Describe an event"
-        hint="Describe an event in plain language; AI turns it into a structured intent you can review."
+        title="Describe your event or intention"
+        hint="Describe an intent in plain language and AI will do all the form filling"
       />
       <div className="card">
         <textarea
           rows={3}
-          placeholder={'e.g. "Find me 3 evenings this week to practice guitar for 1–2 hours"'}
+          placeholder={'e.g. "Coffee date tomorrow at 7", "Find me 3 evenings this week to practice guitar for 1–2 hours", or "I work out at 7pm on MWF"'}
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {
@@ -45,13 +45,10 @@ export function AIComposer(props: { onSubmit: (text: string) => Promise<{ explan
           spellCheck={false}
         />
         <button className="btn" style={{ marginTop: 8, width: '100%' }} disabled={loading || !text.trim()} onClick={go}>
-          {loading ? 'Thinking…' : 'Add with AI'}
+          {loading ? 'Processing…' : 'Add with AI'}
         </button>
         {error ? <p className="empty-hint" style={{ color: 'var(--danger)' }}>{error}</p> : null}
         {note ? <p className="empty-hint" style={{ color: 'var(--ink)', fontStyle: 'normal' }}>{note}</p> : null}
-        <p className="empty-hint" style={{ marginTop: 6 }}>
-          AI turns your words into a structured intent — review and tweak it in the list below. ⌘/Ctrl+Enter to submit.
-        </p>
       </div>
     </div>
   );

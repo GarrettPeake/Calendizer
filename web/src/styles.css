@@ -190,8 +190,25 @@ label.field span { display: block; margin-bottom: 3px; }
 }
 .time-gutter .hr span { position: relative; top: -6px; }
 .day-col { position: relative; border-right: 1px solid var(--line); }
-.day-col .hr-line { height: var(--hour-h); border-bottom: 1px solid var(--hr-line); }
+.day-col .hr-line { height: var(--hour-h); border-bottom: 1px solid var(--hr-line); position: relative; }
 .day-col.weekend { background: var(--weekend); }
+
+/* Soft per-mode wash filling a day that sits inside the mode's span. Painted
+   behind the hour lines and events. Multiple washes stack for overlapping spans. */
+.day-mode-wash { position: absolute; inset: 0; z-index: 0; pointer-events: none; }
+/* Darker tone over the asleep hours of every day. */
+.sleep-band {
+  position: absolute; left: 0; right: 0; z-index: 0; pointer-events: none;
+  background: rgba(0, 0, 0, 0.12);
+}
+.evt { z-index: 2; }
+
+/* Mode name chips under each day header. */
+.cal-head .dh .mode-chips { display: flex; flex-wrap: wrap; gap: 3px; justify-content: center; margin-top: 4px; }
+.cal-head .dh .mode-chip {
+  font-size: 9.5px; line-height: 1.5; padding: 0 6px; border-radius: 999px;
+  border: 1px solid; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 
 .evt {
   position: absolute; left: 3px; right: 3px; border-radius: 6px;
@@ -277,9 +294,11 @@ label.field span { display: block; margin-bottom: 3px; }
 }
 .toggle.on { background: var(--accent); color: #fff; border-color: var(--accent); }
 
-.tv-row { display: grid; grid-template-columns: 110px 1fr 1fr auto; gap: 8px; align-items: center; margin: 8px 0; }
+.tv-row { display: grid; grid-template-columns: 110px 1fr; gap: 8px; align-items: center; margin: 8px 0; }
+.tv-controls { display: flex; gap: 8px; align-items: center; }
+.tv-controls > select, .tv-controls > input { flex: 1; min-width: 0; }
 .tv-label { font-size: 12px; color: var(--ink); }
-.tv-suffix { font-size: 10px; color: var(--muted); }
+.tv-suffix { flex: 0 0 auto; font-size: 10px; color: var(--muted); }
 
 .child-row { display: grid; grid-template-columns: 1fr 110px 80px auto; gap: 8px; align-items: center; margin: 6px 0; }
 .btn-lite {

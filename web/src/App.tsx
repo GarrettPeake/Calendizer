@@ -276,27 +276,35 @@ export function App() {
           </span>
           <div className="spacer" />
           <div className="legend">
-            <span><span className="sleep-tag">sleep</span> during sleep hours</span>
-            <span><span className="swatch" style={{ background: 'transparent', outline: '2px solid var(--danger)' }} />overlap</span>
+            <span><span className="sleep-tag">sleep</span> During sleep hours</span>
+            <span><span className="swatch" style={{ background: 'transparent', outline: '2px solid var(--danger)' }} />Overlap</span>
           </div>
         </div>
 
         {error ? (
           <div className="conflict-banner">
-            <b>Error:</b> {error} <button className="btn tiny ghost" onClick={() => setError(null)}>dismiss</button>
+            <b>Error:</b> {error} <button className="btn tiny ghost" onClick={() => setError(null)}>Dismiss</button>
           </div>
         ) : conflicts.length ? (
           <div className="conflict-banner">
             <b>{conflicts.length} conflict{conflicts.length > 1 ? 's' : ''} this week:</b>
             <ul>
               {conflicts.slice(0, 6).map((c, i) => (
-                <li key={i}>[{c.kind}] {c.message}</li>
+                <li key={i}>{c.message}</li>
               ))}
             </ul>
           </div>
         ) : null}
 
-        <WeekCalendar days={days} fixed={NO_FIXED} instances={solveResp?.instances ?? []} today={today} />
+        <WeekCalendar
+          days={days}
+          fixed={NO_FIXED}
+          instances={solveResp?.instances ?? []}
+          today={today}
+          modes={modes}
+          wakeup={config?.wakeup}
+          sleep={config?.sleep}
+        />
       </div>
 
       {editing ? (

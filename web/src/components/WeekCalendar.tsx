@@ -1,10 +1,39 @@
 import { useMemo } from 'react';
-import type { CalendarEvent, Instance } from 'calendizer';
-import { colorFor } from '../lib/colors';
+import type { CalendarEvent, Instance, TimeValue } from 'calendizer';
+import { colorFor, modeColor } from '../lib/colors';
 import { dateOf, dayLabel, timeOfMin, weekdayCode } from '../lib/dates';
 
 const HOUR_H = 48; // px per hour
 const PX = HOUR_H / 60;
+
+interface ModeSpan {
+  id: string;
+  name: string;
+  span: [string, string];
+}
+
+/** Parse an "HH:MM" clock string to minutes from midnight; null for markers. */
+function clockMin(t: TimeValue | undefined): number | null {
+  if (typeof t !== 'string') return null;
+  const m = /^(\d{1,2}):(\d{2})$/.exec(t.trim());
+  if (!m) return null;
+  return Number(m[1]) * 60 + Number(m[2]);
+}
+
+/** The asleep regions of a day as [startMin, endMin] bands, given wake/sleep. */
+function sleepBands(wakeup: number | null, sleep: number | null): [number, number][] {
+  if (wakeup == null || sleep == null) return [];
+  if (wakeup === sleep) return [];
+  // Normal case (wake before sleep): asleep is the night on either end of the day.
+  if (wakeup < sleep) {
+    const out: [number, number][] = [];
+    if (wakeup > 0) out.push([0, wakeup]);
+    if (sleep < 1440) out.push([sleep, 1440]);
+    return out;
+  }
+  // Overnight-awake: a single asleep band in the middle of the day.
+  return [[sleep, wakeup]];
+}
 
 interface DisplayEvent {
   uid: string;
@@ -90,9 +119,21 @@ export function WeekCalendar(props: {
   fixed: CalendarEvent[];
   instances: Instance[];
   today: string;
+  modes?: ModeSpan[];
+  wakeup?: TimeValue;
+  sleep?: TimeValue;
 }) {
-  const { days, fixed, instances, today } = props;
+  const { days, fixed, instances, today, modes = [] } = props;
   const dayset = new Set(days);
+
+  // Which modes cover each visible day (a day can sit inside several spans).
+  const modesByDay = useMemo(() => {
+    const map: Record<string, ModeSpan[]> = {};
+    for (const d of days) map[d] = modes.filter((m) => d >= m.span[0] && d <= m.span[1]);
+    return map;
+  }, [days, modes]);
+
+  const bands = useMemo(() => sleepBands(clockMin(props.wakeup), clockMin(props.sleep)), [props.wakeup, props.sleep]);
 
   const byDay = useMemo(() => {
     const map: Record<string, DisplayEvent[]> = {};
@@ -140,6 +181,23 @@ export function WeekCalendar(props: {
             <div key={d} className={`dh${d === today ? ' today' : ''}`}>
               <div className="dow">{dow}</div>
               <div className="num">{day}</div>
+              {modesByDay[d].length ? (
+                <div className="mode-chips">
+                  {modesByDay[d].map((m) => {
+                    const c = modeColor(m.id);
+                    return (
+                      <span
+                        key={m.id}
+                        className="mode-chip"
+                        style={{ background: c.wash, color: c.text, borderColor: c.chip }}
+                        title={m.name}
+                      >
+                        {m.name}
+                      </span>
+                    );
+                  })}
+                </div>
+              ) : null}
             </div>
           );
         })}
@@ -159,6 +217,16 @@ export function WeekCalendar(props: {
           const weekend = wd === 'SA' || wd === 'SU';
           return (
             <div key={d} className={`day-col${weekend ? ' weekend' : ''}`}>
+              {modesByDay[d].map((m) => (
+                <div key={m.id} className="day-mode-wash" style={{ background: modeColor(m.id).wash }} />
+              ))}
+              {bands.map(([s, e], i) => (
+                <div
+                  key={`sb${i}`}
+                  className="sleep-band"
+                  style={{ top: s * PX, height: (e - s) * PX }}
+                />
+              ))}
               {hours.map((h) => (
                 <div className="hr-line" key={h} />
               ))}

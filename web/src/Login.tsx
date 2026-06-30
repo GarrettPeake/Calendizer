@@ -31,7 +31,7 @@ export function Login(props: { onAuthed: (user: User) => void }) {
     <div className="auth-screen">
       <form className="auth-card" onSubmit={submit}>
         <h1>Calendizer</h1>
-        <p className="tagline">Manage your calendar by delegation.</p>
+        <p className="tagline">Create a dynamic calendar that just works</p>
 
         <div className="auth-tabs">
           <button type="button" className={mode === 'login' ? 'on' : ''} onClick={() => setMode('login')}>

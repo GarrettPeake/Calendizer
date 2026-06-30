@@ -37,26 +37,21 @@ export function FeedPanel(props: {
       <SectionHeader
         icon={<FeedIcon />}
         title="Calendar feed"
-        hint="Your private subscription URL. Add it in Google/Apple Calendar; rotate it to revoke access."
+        hint="Add this calendar to your Calendar app with the below URL (you can rotate the URL to revoke access at any time)"
       />
       <div className="card">
         <p className="empty-hint" style={{ marginTop: 0 }}>
-          Subscribe in your Calendar app with this secret URL:
+          Add this calendar to your Calendar app with this secret URL:
         </p>
         <input type="text" readOnly value={props.url ?? ''} onFocus={(e) => e.currentTarget.select()} />
         <div className="row" style={{ marginTop: 8 }}>
           <button className="btn tiny" onClick={copy}>
-            {copied ? 'Copied' : 'Copy'}
+            {copied ? 'Copied!' : 'Copy'}
           </button>
           <button className="btn tiny ghost" onClick={rotate} disabled={rotating}>
             {rotating ? '…' : 'Rotate'}
           </button>
         </div>
-        <p className="empty-hint" style={{ marginTop: 8 }}>
-          Solved {props.instanceCount} events over 12 months
-          {props.solveMs != null ? ` in ${props.solveMs} ms` : ''}
-          {props.cached ? ' (cached)' : ''}.
-        </p>
       </div>
     </div>
   );
