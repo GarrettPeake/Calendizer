@@ -1,12 +1,11 @@
 import type { GlobalConfig, Intent, Mode } from 'calendizer';
 import type { FeedInfo, ModeRecord, User } from '../api';
-import type { IntentPreset } from '../data/intents';
 import { colorFor } from '../lib/colors';
 import { slug, summarize } from '../lib/intentMeta';
 import { AIComposer } from './AIComposer';
 import { FeedPanel } from './FeedPanel';
 import { SectionHeader } from './SectionHeader';
-import { GridIcon, LayersIcon, ListIcon, SlidersIcon } from './icons';
+import { LayersIcon, ListIcon, SlidersIcon } from './icons';
 
 interface Props {
   user: User;
@@ -14,7 +13,6 @@ interface Props {
   config: GlobalConfig | null;
   onConfigChange: (config: GlobalConfig) => void;
   intents: Intent[];
-  onAddPreset: (id: string) => void;
   onAIAdd: (text: string) => Promise<{ explanation?: string }>;
   onEditIntent: (intent: Intent) => void;
   onNewIntent: () => void;
@@ -23,7 +21,6 @@ interface Props {
   onAddMode: () => void;
   onUpdateMode: (id: string, mode: Mode) => void;
   onDeleteMode: (id: string) => void;
-  intentLibrary: IntentPreset[];
   feed: FeedInfo | null;
   onRotateFeed: () => Promise<void>;
   solveMs: number | null;
@@ -48,22 +45,6 @@ export function Sidebar(p: Props) {
       </div>
 
       <AIComposer onSubmit={p.onAIAdd} />
-
-      <div className="section">
-        <SectionHeader
-          icon={<GridIcon />}
-          title="Intent library"
-          hint="One-click starting points. Adds a ready-made intent you can then tweak."
-        />
-        <div className="lib-grid">
-          {p.intentLibrary.map((preset) => (
-            <button key={preset.id} className="lib-item" onClick={() => p.onAddPreset(preset.id)} title={preset.description}>
-              <div className="l-title">{preset.label}</div>
-              <div className="l-desc">{preset.description}</div>
-            </button>
-          ))}
-        </div>
-      </div>
 
       <div className="section">
         <SectionHeader
@@ -108,21 +89,36 @@ export function Sidebar(p: Props) {
           title="Modes"
           hint="Named date spans (e.g. a vacation) that swap which intents are active during them."
         />
-        {p.modes.map((m) => (
-          <div className="mode-row" key={m.id}>
-            <input
-              defaultValue={m.name}
-              style={{ flex: 1.2 }}
-              onBlur={(e) => p.onUpdateMode(m.id, { name: e.target.value, span: m.span })}
-            />
-            <input defaultValue={m.span[0]} onBlur={(e) => p.onUpdateMode(m.id, { name: m.name, span: [e.target.value, m.span[1]] })} />
-            <input defaultValue={m.span[1]} onBlur={(e) => p.onUpdateMode(m.id, { name: m.name, span: [m.span[0], e.target.value] })} />
-            <button className="btn tiny danger" onClick={() => p.onDeleteMode(m.id)} title="Remove mode">
-              ×
-            </button>
-          </div>
-        ))}
-        <button className="btn tiny ghost" onClick={p.onAddMode}>
+        {p.modes.length === 0 ? (
+          <p className="empty-hint">No modes. Add one to clear or swap intents over a date span.</p>
+        ) : (
+          p.modes.map((m) => (
+            <div className="mode-row" key={m.id}>
+              <div className="mode-top">
+                <input
+                  className="mode-name"
+                  defaultValue={m.name}
+                  placeholder="mode name"
+                  onBlur={(e) => p.onUpdateMode(m.id, { name: e.target.value, span: m.span })}
+                />
+                <button className="btn tiny danger" onClick={() => p.onDeleteMode(m.id)} title="Remove mode">
+                  ×
+                </button>
+              </div>
+              <div className="mode-dates">
+                <label className="mode-date">
+                  <span>from</span>
+                  <input defaultValue={m.span[0]} placeholder="YYYY-MM-DD" onBlur={(e) => p.onUpdateMode(m.id, { name: m.name, span: [e.target.value, m.span[1]] })} />
+                </label>
+                <label className="mode-date">
+                  <span>to</span>
+                  <input defaultValue={m.span[1]} placeholder="YYYY-MM-DD" onBlur={(e) => p.onUpdateMode(m.id, { name: m.name, span: [m.span[0], e.target.value] })} />
+                </label>
+              </div>
+            </div>
+          ))
+        )}
+        <button className="btn tiny" style={{ marginTop: 6 }} onClick={p.onAddMode}>
           + add mode
         </button>
       </div>

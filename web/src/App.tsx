@@ -6,7 +6,6 @@ import { Sidebar } from './components/Sidebar';
 import { WeekCalendar } from './components/WeekCalendar';
 import { IntentEditor, blankIntent } from './components/IntentEditor';
 import { ThemeToggle, type Theme } from './components/ThemeToggle';
-import { INTENT_LIBRARY } from './data/intents';
 import { addDays, mondayOf, rangeLabel, weekDates } from './lib/dates';
 
 const NO_FIXED: never[] = [];
@@ -102,15 +101,6 @@ export function App() {
   }
 
   /* ---------------- mutations ---------------- */
-  async function onAddPreset(presetId: string) {
-    const preset = INTENT_LIBRARY.find((p) => p.id === presetId);
-    if (!preset) return;
-    await guard(api.createIntent(structuredClone(preset.intent)).then(reload));
-    if (preset.needsMode && !modes.some((m) => m.name === preset.needsMode)) {
-      const start = solveResp?.horizon.start ?? mondayOf(today);
-      await guard(api.createMode({ name: preset.needsMode, span: [start, addDays(start, 6)] }).then(reload));
-    }
-  }
   async function saveEditing(updated: Intent) {
     if (!editing) return;
     const p = editing.isNew ? api.createIntent(updated) : api.updateIntent(updated.id!, updated);
@@ -200,7 +190,6 @@ export function App() {
         config={config}
         onConfigChange={changeConfig}
         intents={intents}
-        onAddPreset={onAddPreset}
         onAIAdd={aiAdd}
         onEditIntent={(intent) => setEditing({ intent, isNew: false })}
         onNewIntent={() => setEditing({ intent: blankIntent(), isNew: true })}
@@ -212,7 +201,6 @@ export function App() {
         }}
         onUpdateMode={(id, mode) => guard(api.updateMode(id, mode).then(reload))}
         onDeleteMode={(id) => guard(api.deleteMode(id).then(reload))}
-        intentLibrary={INTENT_LIBRARY}
         feed={feed}
         onRotateFeed={rotateFeed}
         solveMs={solveResp?.solveMs ?? null}
@@ -239,7 +227,6 @@ export function App() {
           </span>
           <div className="spacer" />
           <div className="legend">
-            <span><span className="swatch" style={{ background: 'hsl(210 70% 92%)', border: '1px solid hsl(210 65% 55%)' }} />Solved</span>
             <span><span className="sleep-tag">sleep</span> during sleep hours</span>
             <span><span className="swatch" style={{ background: 'transparent', outline: '2px solid var(--danger)' }} />overlap</span>
           </div>

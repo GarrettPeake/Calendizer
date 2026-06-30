@@ -41,7 +41,7 @@ export function FeedPanel(props: {
       />
       <div className="card">
         <p className="empty-hint" style={{ marginTop: 0 }}>
-          Subscribe in Google/Apple Calendar with this secret URL:
+          Subscribe in your Calendar app with this secret URL:
         </p>
         <input type="text" readOnly value={props.url ?? ''} onFocus={(e) => e.currentTarget.select()} />
         <div className="row" style={{ marginTop: 8 }}>
