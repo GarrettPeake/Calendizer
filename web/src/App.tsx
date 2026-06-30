@@ -7,6 +7,8 @@ import { WeekCalendar } from './components/WeekCalendar';
 import { IntentEditor, blankIntent } from './components/IntentEditor';
 import { ModeEditor } from './components/ModeEditor';
 import { ThemeToggle, type Theme } from './components/ThemeToggle';
+import { DetectBanner } from './components/DetectBanner';
+import { buildProposal, detectEnvironment, type Detected } from './lib/detect';
 import { addDays, mondayOf, rangeLabel, weekDates } from './lib/dates';
 
 const NO_FIXED: never[] = [];
@@ -37,6 +39,8 @@ export function App() {
   const [editing, setEditing] = useState<{ intent: Intent; isNew: boolean } | null>(null);
   const [editingMode, setEditingMode] = useState<{ mode: ModeRecord | null } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [detected, setDetected] = useState<Detected | null>(null);
+  const [geoDismissed, setGeoDismissed] = useState<string>(() => localStorage.getItem('calendizer_geo_dismissed') ?? '');
 
   const configDirty = useRef(false);
   const initialWeekSet = useRef(false);
@@ -100,6 +104,29 @@ export function App() {
   function changeConfig(next: GlobalConfig) {
     configDirty.current = true;
     setConfigState(next);
+  }
+
+  /* ---------------- detect timezone/location from the browser ---------------- */
+  useEffect(() => {
+    if (!user) return;
+    detectEnvironment().then(setDetected);
+    const onFocus = () => detectEnvironment().then(setDetected);
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, [user]);
+
+  const geoProposal = useMemo(() => (config && detected ? buildProposal(config, detected) : null), [config, detected]);
+
+  async function applyGeo() {
+    if (!config || !geoProposal) return;
+    const merged = { ...config, ...geoProposal.next };
+    setConfigState(merged);
+    await guard(api.putConfig(merged).then(() => api.solve()).then(setSolveResp));
+  }
+  function dismissGeo() {
+    if (!geoProposal) return;
+    setGeoDismissed(geoProposal.sig);
+    localStorage.setItem('calendizer_geo_dismissed', geoProposal.sig);
   }
 
   /* ---------------- mutations ---------------- */
@@ -215,6 +242,9 @@ export function App() {
       />
 
       <div className="main">
+        {geoProposal && geoProposal.sig !== geoDismissed ? (
+          <DetectBanner proposal={geoProposal} onApply={applyGeo} onDismiss={dismissGeo} />
+        ) : null}
         <div className="toolbar">
           <button className="nav-btn" onClick={() => setViewWeek((w) => Math.max(0, w - 1))} disabled={safeWeek === 0}>
             ‹
