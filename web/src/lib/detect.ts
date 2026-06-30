@@ -8,6 +8,7 @@ export interface Detected {
   tzName: string;
   lat?: number;
   lon?: number;
+  city?: string;
 }
 
 /** Timezone from the browser clock — synchronous, no permission. */
@@ -54,8 +55,11 @@ export function buildProposal(config: GlobalConfig, d: Detected): GeoProposal | 
     const cl = config.location;
     const moved = !cl || Math.abs(cl.lat - d.lat) > 0.1 || Math.abs(cl.lon - d.lon) > 0.1;
     if (moved) {
-      changes.push({ label: 'Location', from: cl ? `${cl.lat}, ${cl.lon}` : 'not set', to: `${d.lat}, ${d.lon}` });
+      const fromLabel = config.city ?? (cl ? `${cl.lat}, ${cl.lon}` : 'not set');
+      const toLabel = d.city ?? `${d.lat}, ${d.lon}`;
+      changes.push({ label: 'Location', from: fromLabel, to: toLabel });
       next.location = { lat: d.lat, lon: d.lon };
+      if (d.city) next.city = d.city;
     }
   }
 

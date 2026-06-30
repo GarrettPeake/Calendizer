@@ -85,6 +85,8 @@ export interface Mode {
 export interface GlobalConfig {
   /** Latitude/longitude for solar markers. */
   location?: { lat: number; lon: number };
+  /** Display label for the chosen location (e.g. "Los Angeles"). Ignored by the solver. */
+  city?: string;
   /** Fixed UTC offset in minutes used for solar resolution (e.g. -240 for EDT). */
   utcOffsetMinutes?: number;
   /** Clock time resolving the `wakeup` marker. */

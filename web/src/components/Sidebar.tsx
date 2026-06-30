@@ -3,6 +3,7 @@ import type { FeedInfo, ModeRecord, User } from '../api';
 import { colorFor } from '../lib/colors';
 import { rangeLabel } from '../lib/dates';
 import { slug, summarize } from '../lib/intentMeta';
+import { CITIES, findCity, tzOffsetMinutes } from '../data/cities';
 import { AIComposer } from './AIComposer';
 import { FeedPanel } from './FeedPanel';
 import { SectionHeader } from './SectionHeader';
@@ -158,11 +159,27 @@ function ConfigCard({ config, onChange }: { config: GlobalConfig; onChange: (c: 
           <Num label="min break" value={config.min_break} onChange={(v) => set({ min_break: v })} hint="Shortest gap that counts as a real break; smaller gaps are avoided as slivers." />
           <Num label="max block" value={config.max_block} onChange={(v) => set({ max_block: v })} hint="Longest continuous run of activity before a break is wanted." />
         </div>
-        <div className="row">
-          <Num label="lat" value={config.location?.lat ?? 0} onChange={(v) => set({ location: { lat: v, lon: config.location?.lon ?? 0 } })} hint="Latitude — used to resolve sunrise / sunset / dawn / dusk markers." />
-          <Num label="lon" value={config.location?.lon ?? 0} onChange={(v) => set({ location: { lat: config.location?.lat ?? 0, lon: v } })} hint="Longitude — used to resolve sunrise / sunset / dawn / dusk markers." />
-          <Num label="utc offset" value={config.utcOffsetMinutes ?? 0} onChange={(v) => set({ utcOffsetMinutes: v })} hint="Timezone offset from UTC in minutes (e.g. -240 for EDT). Used for solar markers and 'today'." />
-        </div>
+        <label
+          className="field"
+          title="Sets your coordinates (for sunrise/sunset markers) and timezone offset. Auto-detected from your IP; change it here to override."
+        >
+          <span>city</span>
+          <select
+            value={config.city ?? ''}
+            onChange={(e) => {
+              const c = findCity(e.target.value);
+              if (c) set({ city: c.name, location: { lat: c.lat, lon: c.lon }, utcOffsetMinutes: tzOffsetMinutes(c.tz) });
+            }}
+          >
+            {!config.city ? <option value="">Select a city…</option> : null}
+            {config.city && !findCity(config.city) ? <option value={config.city}>{config.city} (detected)</option> : null}
+            {CITIES.map((c) => (
+              <option key={c.name} value={c.name}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+        </label>
         <label
           className="chk"
           style={{ marginTop: 8, color: 'var(--muted)' }}

@@ -113,14 +113,16 @@ export function App() {
       const tz = detectTimezone();
       let lat: number | undefined;
       let lon: number | undefined;
+      let city: string | undefined;
       try {
         const g = await api.geo();
         lat = g.lat;
         lon = g.lon;
+        city = g.city;
       } catch {
         /* geo unavailable — timezone still detected */
       }
-      setDetected({ ...tz, lat, lon });
+      setDetected({ ...tz, lat, lon, city });
     };
     run();
     window.addEventListener('focus', run);
