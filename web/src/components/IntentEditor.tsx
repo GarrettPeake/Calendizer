@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { Intent, TimeValue, Marker, DaysSpec } from 'calendizer';
+import type { ModeRecord } from '../api';
 
 const MARKERS: Marker[] = ['wakeup', 'sleep', 'dawn', 'dusk', 'sunrise', 'sunset'];
 const WEEKDAYS = ['MO', 'TU', 'WE', 'TH', 'FR', 'SA', 'SU'];
@@ -19,6 +20,7 @@ export function blankIntent(): Intent {
 export function IntentEditor(props: {
   initial: Intent;
   isNew: boolean;
+  modes: ModeRecord[];
   onSave: (intent: Intent) => void;
   onCancel: () => void;
   onSmartEdit: (intent: Intent, instruction: string) => Promise<{ intent: Intent; updates: string; issues: string[] }>;
@@ -64,6 +66,14 @@ export function IntentEditor(props: {
     : 'weekdays' in card.days
     ? 'weekdays'
     : 'dates';
+
+  // Resolve the mode reference to a <select> value: "default"/"all", a known
+  // mode id, or a legacy name mapped to its id. Unknown refs get a fallback option.
+  const modeValue =
+    d.mode === 'default' || d.mode === 'all'
+      ? d.mode
+      : props.modes.find((m) => m.id === d.mode)?.id ?? props.modes.find((m) => m.name === d.mode)?.id ?? d.mode;
+  const modeKnown = modeValue === 'default' || modeValue === 'all' || props.modes.some((m) => m.id === modeValue);
 
   return (
     <div className="modal-overlay" onMouseDown={props.onCancel}>
@@ -113,12 +123,16 @@ export function IntentEditor(props: {
             </Field>
             <div className="grid3">
               <Field label="Mode">
-                <input
-                  type="text"
-                  value={d.mode}
-                  onChange={(e) => patch({ mode: e.target.value })}
-                  placeholder="default | all | <mode>"
-                />
+                <select value={modeValue} onChange={(e) => patch({ mode: e.target.value })}>
+                  <option value="default">default</option>
+                  <option value="all">all (every mode)</option>
+                  {props.modes.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.name}
+                    </option>
+                  ))}
+                  {!modeKnown ? <option value={modeValue}>(unknown mode)</option> : null}
+                </select>
               </Field>
               <Field label="Priority">
                 <input type="number" value={d.priority} onChange={(e) => patch({ priority: Number(e.target.value) })} />

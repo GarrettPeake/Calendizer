@@ -163,14 +163,21 @@ app.post('/api/smart', requireAuth, async (c) => {
     return c.json({ error: e instanceof Error ? e.message : String(e) }, 502);
   }
 
-  const intent = await repo.createIntent(c.env.DB, userId, parsed.intent);
-  let mode = null;
-  if (parsed.mode?.name) {
-    const existing = (await repo.listModes(c.env.DB, userId)).find((m) => m.name === parsed.mode!.name);
-    mode = existing ?? (await repo.createMode(c.env.DB, userId, parsed.mode));
+  // The model returns mode as a NAME (or "default"/"all"); resolve it to a stored
+  // mode ID so the intent links by id, not name.
+  let modeRecord = null;
+  let modeRef = parsed.intent.mode;
+  if (modeRef && modeRef !== 'default' && modeRef !== 'all') {
+    const modes = await repo.listModes(c.env.DB, userId);
+    modeRecord = modes.find((m) => m.name === modeRef) ?? null;
+    if (!modeRecord && parsed.mode?.name) {
+      modeRecord = await repo.createMode(c.env.DB, userId, { name: parsed.mode.name, span: parsed.mode.span });
+    }
+    modeRef = modeRecord ? modeRecord.id : 'default';
   }
+  const intent = await repo.createIntent(c.env.DB, userId, { ...parsed.intent, mode: modeRef });
   await invalidate(c);
-  return c.json({ intent, mode, explanation: parsed.explanation }, 201);
+  return c.json({ intent, mode: modeRecord, explanation: parsed.explanation }, 201);
 });
 
 // Propose an edit to an intent from a natural-language instruction. Does NOT
@@ -180,14 +187,30 @@ app.post('/api/smart/edit', requireAuth, async (c) => {
   const body = (await c.req.json().catch(() => ({}))) as { intent?: Intent; instruction?: string };
   if (!body.intent || !body.instruction?.trim()) return c.json({ error: 'intent and instruction are required' }, 400);
 
-  const config = await repo.getConfig(c.env.DB, c.get('userId'));
+  const userId = c.get('userId');
+  const config = await repo.getConfig(c.env.DB, userId);
   const today = new Date(Date.now() + (config.utcOffsetMinutes ?? 0) * 60_000).toISOString().slice(0, 10);
+
+  // Keep the model in name-space: translate the intent's mode id → name on the
+  // way in, and the returned name → id on the way out (preserving the original
+  // link if the model names a mode that doesn't exist).
+  const modes = await repo.listModes(c.env.DB, userId);
+  const idToName = new Map(modes.map((m) => [m.id, m.name] as const));
+  const nameToId = new Map(modes.map((m) => [m.name, m.id] as const));
+  const original = body.intent;
+  const forLLM: Intent = {
+    ...original,
+    mode: original.mode === 'default' || original.mode === 'all' ? original.mode : idToName.get(original.mode) ?? original.mode,
+  };
+
   try {
-    const result = await parseSmartEdit(c.env, body.intent, body.instruction.trim(), {
+    const result = await parseSmartEdit(c.env, forLLM, body.instruction.trim(), {
       today,
       wakeup: String(config.wakeup),
       sleep: String(config.sleep),
     });
+    const rm = result.intent.mode;
+    result.intent.mode = rm === 'default' || rm === 'all' ? rm : nameToId.get(rm) ?? original.mode;
     return c.json(result);
   } catch (e) {
     return c.json({ error: e instanceof Error ? e.message : String(e) }, 502);

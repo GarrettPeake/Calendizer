@@ -25,8 +25,8 @@ function cardSummary(c: Cardinality): string {
   return parts.join(' ');
 }
 
-export function summarize(intent: Intent): string {
-  const bits = [intent.mode, `p${intent.priority}`, dur(intent), cardSummary(intent.cardinality)];
+export function summarize(intent: Intent, modeLabel?: string): string {
+  const bits = [modeLabel ?? intent.mode, `p${intent.priority}`, dur(intent), cardSummary(intent.cardinality)];
   if (intent.children?.length) bits.push(`${intent.children.length} children`);
   return bits.filter(Boolean).join(' · ');
 }

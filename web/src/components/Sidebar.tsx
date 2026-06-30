@@ -30,6 +30,12 @@ interface Props {
 }
 
 export function Sidebar(p: Props) {
+  // Intents reference a mode by id; show its current name in the summary.
+  const modeName = (ref: string) =>
+    ref === 'default' || ref === 'all'
+      ? ref
+      : p.modes.find((m) => m.id === ref)?.name ?? p.modes.find((m) => m.name === ref)?.name ?? ref;
+
   return (
     <aside className="sidebar">
       <div className="side-head">
@@ -62,7 +68,7 @@ export function Sidebar(p: Props) {
                 <span className="dot" style={{ background: col.border }} />
                 <div className="meta">
                   <div className="s">{intent.subject}</div>
-                  <div className="sub">{summarize(intent)}</div>
+                  <div className="sub">{summarize(intent, modeName(intent.mode))}</div>
                 </div>
                 <button
                   className="btn tiny danger"

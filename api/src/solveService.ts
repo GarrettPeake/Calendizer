@@ -29,6 +29,15 @@ export interface SolvedResult {
   cached: boolean;
 }
 
+/** Resolve an intent's mode reference (id | "default" | "all" | legacy name) to
+ *  the mode NAME the solver expects. */
+function resolveModeName(ref: string, idToName: Map<string, string>, nameSet: Set<string>): string {
+  if (ref === 'default' || ref === 'all') return ref;
+  if (idToName.has(ref)) return idToName.get(ref)!;
+  if (nameSet.has(ref)) return ref; // legacy name-based reference
+  return 'default'; // dangling id (mode deleted)
+}
+
 /** Today's date (YYYY-MM-DD) in the user's fixed UTC offset. */
 function localToday(utcOffsetMinutes: number): string {
   const shifted = new Date(Date.now() + utcOffsetMinutes * 60_000);
@@ -60,12 +69,19 @@ export async function getSolved(db: D1Database, userId: string): Promise<SolvedR
   ]);
   const modes = modeRecords.map((m) => ({ name: m.name, span: m.span }));
 
+  // Intents reference a mode by ID (or the reserved "default"/"all"); the solver
+  // is name-based, so resolve IDs → current names here. Legacy name refs and
+  // dangling IDs fall back gracefully.
+  const idToName = new Map(modeRecords.map((m) => [m.id, m.name] as const));
+  const nameSet = new Set(modeRecords.map((m) => m.name));
+  const resolvedIntents = intents.map((i) => ({ ...i, mode: resolveModeName(i.mode, idToName, nameSet) }));
+
   const start = localToday(config.utcOffsetMinutes ?? 0);
   const end = addDays(start, HORIZON_DAYS);
 
   const perf = (globalThis as any).performance;
   const t0 = perf?.now?.() ?? Date.now();
-  const out = solve({ config, intents, modes, horizon: { start, end } });
+  const out = solve({ config, intents: resolvedIntents, modes, horizon: { start, end } });
   const t1 = perf?.now?.() ?? Date.now();
   const solveMs = Math.round(t1 - t0);
 

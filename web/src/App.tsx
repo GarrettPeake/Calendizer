@@ -255,6 +255,7 @@ export function App() {
           key={editing.isNew ? 'new' : editing.intent.id}
           initial={editing.intent}
           isNew={editing.isNew}
+          modes={modes}
           onSave={saveEditing}
           onCancel={() => setEditing(null)}
           onSmartEdit={(intent, instruction) => api.smartEdit(intent, instruction)}
