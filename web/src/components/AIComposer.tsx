@@ -1,4 +1,6 @@
 import { useState } from 'react';
+import { SectionHeader } from './SectionHeader';
+import { WandIcon } from './icons';
 
 /** Natural-language → intent. Delegates the request to the parent (which adds
  *  config/today context), then shows the model's one-line explanation. */
@@ -26,7 +28,11 @@ export function AIComposer(props: { onSubmit: (text: string) => Promise<{ explan
 
   return (
     <div className="section">
-      <h2>✨ Describe an event</h2>
+      <SectionHeader
+        icon={<WandIcon />}
+        title="Describe an event"
+        hint="Describe an event in plain language; AI turns it into a structured intent you can review."
+      />
       <div className="card">
         <textarea
           rows={3}
@@ -39,12 +45,12 @@ export function AIComposer(props: { onSubmit: (text: string) => Promise<{ explan
           spellCheck={false}
         />
         <button className="btn" style={{ marginTop: 8, width: '100%' }} disabled={loading || !text.trim()} onClick={go}>
-          {loading ? 'Asking Claude…' : 'Add with AI'}
+          {loading ? 'Thinking…' : 'Add with AI'}
         </button>
-        {error ? <p className="empty-hint" style={{ color: '#ffb4b6' }}>{error}</p> : null}
-        {note ? <p className="empty-hint" style={{ color: '#9fd8a0', fontStyle: 'normal' }}>✓ {note}</p> : null}
+        {error ? <p className="empty-hint" style={{ color: 'var(--danger)' }}>{error}</p> : null}
+        {note ? <p className="empty-hint" style={{ color: 'var(--ink)', fontStyle: 'normal' }}>{note}</p> : null}
         <p className="empty-hint" style={{ marginTop: 6 }}>
-          Claude turns your words into a structured intent — review/tweak it in the list below. ⌘/Ctrl+Enter to submit.
+          AI turns your words into a structured intent — review and tweak it in the list below. ⌘/Ctrl+Enter to submit.
         </p>
       </div>
     </div>

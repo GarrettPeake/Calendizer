@@ -71,7 +71,7 @@ export function IntentEditor(props: {
         <div className="modal-head">
           <h3>{props.isNew ? 'New intent' : `Edit “${props.initial.subject}”`}</h3>
           <button className="x" onClick={props.onCancel}>
-            ✕
+            ×
           </button>
         </div>
 
@@ -96,11 +96,11 @@ export function IntentEditor(props: {
               </button>
             </div>
             {aiError ? <p className="ai-note err">{aiError}</p> : null}
-            {aiSummary ? <p className="ai-note ok">✎ {aiSummary} <span className="ai-hint">— review below, then Save</span></p> : null}
+            {aiSummary ? <p className="ai-note ok">{aiSummary} <span className="ai-hint">— review below, then Save</span></p> : null}
             {aiIssues.length ? (
               <ul className="ai-issues">
                 {aiIssues.map((iss, i) => (
-                  <li key={i}>⚠ {iss}</li>
+                  <li key={i}>{iss}</li>
                 ))}
               </ul>
             ) : null}
@@ -428,7 +428,7 @@ export function IntentEditor(props: {
                         className="x small"
                         onClick={() => patch({ children: d.children!.filter((_, j) => j !== i) })}
                       >
-                        ✕
+                        ×
                       </button>
                     </div>
                   );

@@ -189,7 +189,7 @@ export function WeekCalendar(props: {
                     }`}
                   >
                     <div className="t">
-                      {e.placedDuringSleep ? <span className="moon">🌙 </span> : null}
+                      {e.placedDuringSleep ? <span className="sleep-tag">sleep</span> : null}
                       {e.subject}
                     </div>
                     <div className="time">

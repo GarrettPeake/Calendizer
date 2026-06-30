@@ -14,7 +14,7 @@ export interface IntentPreset {
 export const INTENT_LIBRARY: IntentPreset[] = [
   {
     id: 'pottery',
-    label: '🏺 Pottery 3–4×/week',
+    label: 'Pottery 3–4×/week',
     description: '1–2h, studio open 9–7 (until 9 Tue/Thu/Sun).',
     intent: {
       subject: 'pottery',
@@ -27,7 +27,7 @@ export const INTENT_LIBRARY: IntentPreset[] = [
   },
   {
     id: 'morning-routine',
-    label: '🪥 Morning routine',
+    label: 'Morning routine',
     description: 'Brush · do hair · shower, back-to-back right after wakeup.',
     intent: {
       subject: 'morning routine',
@@ -49,7 +49,7 @@ export const INTENT_LIBRARY: IntentPreset[] = [
   },
   {
     id: 'medication',
-    label: '💊 Medication (every day, any mode)',
+    label: 'Medication (every day, any mode)',
     description: 'Pinned 8am, runs in every mode.',
     intent: {
       subject: 'take medication',
@@ -62,7 +62,7 @@ export const INTENT_LIBRARY: IntentPreset[] = [
   },
   {
     id: 'stretching',
-    label: '🤸 Stretch 2×/day, 3 days/week',
+    label: 'Stretch 2×/day, 3 days/week',
     description: '10 min, capped at 24 lifetime occurrences.',
     intent: {
       subject: 'stretching',
@@ -80,7 +80,7 @@ export const INTENT_LIBRARY: IntentPreset[] = [
   },
   {
     id: 'mai-tai',
-    label: '🍹 Mai Tai on vacation (≥2)',
+    label: 'Mai Tai on vacation (≥2)',
     description: 'Around noon, at least twice — needs a "vacation" mode.',
     needsMode: 'vacation',
     intent: {
@@ -94,7 +94,7 @@ export const INTENT_LIBRARY: IntentPreset[] = [
   },
   {
     id: 'fishing',
-    label: '🎣 Fishing trip (one-off, 3am)',
+    label: 'Fishing trip (one-off, 3am)',
     description: 'Sat 4h from 3am — the sleep blackout yields.',
     intent: {
       subject: 'fishing',
@@ -107,7 +107,7 @@ export const INTENT_LIBRARY: IntentPreset[] = [
   },
   {
     id: 'guitar',
-    label: '🎸 Guitar practice 3×/week',
+    label: 'Guitar practice 3×/week',
     description: '1–2h in the evening.',
     intent: {
       subject: 'guitar practice',
@@ -120,7 +120,7 @@ export const INTENT_LIBRARY: IntentPreset[] = [
   },
   {
     id: 'gym',
-    label: '🏋️ Gym Mon/Wed/Fri',
+    label: 'Gym Mon/Wed/Fri',
     description: 'Fixed weekdays, mornings.',
     intent: {
       subject: 'gym',
@@ -133,7 +133,7 @@ export const INTENT_LIBRARY: IntentPreset[] = [
   },
   {
     id: 'deep-work',
-    label: '🧠 Deep work block (daily)',
+    label: 'Deep work block (daily)',
     description: '2h of focus every weekday afternoon.',
     intent: {
       subject: 'deep work',
@@ -146,7 +146,7 @@ export const INTENT_LIBRARY: IntentPreset[] = [
   },
   {
     id: 'reading',
-    label: '📚 Wind-down reading',
+    label: 'Wind-down reading',
     description: '30 min before bed, every night.',
     intent: {
       subject: 'reading',

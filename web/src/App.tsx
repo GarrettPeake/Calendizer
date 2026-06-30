@@ -5,12 +5,26 @@ import { Login } from './Login';
 import { Sidebar } from './components/Sidebar';
 import { WeekCalendar } from './components/WeekCalendar';
 import { IntentEditor, blankIntent } from './components/IntentEditor';
+import { ThemeToggle, type Theme } from './components/ThemeToggle';
 import { INTENT_LIBRARY } from './data/intents';
 import { addDays, mondayOf, rangeLabel, weekDates } from './lib/dates';
 
 const NO_FIXED: never[] = [];
 
+function initialTheme(): Theme {
+  const saved = localStorage.getItem('calendizer_theme');
+  if (saved === 'light' || saved === 'dark') return saved;
+  return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+}
+
 export function App() {
+  const [theme, setTheme] = useState<Theme>(initialTheme);
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+    localStorage.setItem('calendizer_theme', theme);
+  }, [theme]);
+  const toggleTheme = () => setTheme((t) => (t === 'dark' ? 'light' : 'dark'));
+
   const [user, setUser] = useState<User | null>(null);
   const [booting, setBooting] = useState(true);
 
@@ -151,15 +165,24 @@ export function App() {
     }
   }, [mondays, today]);
 
-  if (booting) return <div className="boot">Loading…</div>;
+  if (booting)
+    return (
+      <>
+        <div className="boot">Loading…</div>
+        <ThemeToggle theme={theme} onToggle={toggleTheme} />
+      </>
+    );
   if (!user)
     return (
-      <Login
-        onAuthed={(u) => {
-          setUser(u);
-          loadAll().catch((e) => setError(e instanceof Error ? e.message : String(e)));
-        }}
-      />
+      <>
+        <Login
+          onAuthed={(u) => {
+            setUser(u);
+            loadAll().catch((e) => setError(e instanceof Error ? e.message : String(e)));
+          }}
+        />
+        <ThemeToggle theme={theme} onToggle={toggleTheme} />
+      </>
     );
 
   const safeWeek = Math.min(viewWeek, Math.max(0, mondays.length - 1));
@@ -169,6 +192,7 @@ export function App() {
   );
 
   return (
+    <>
     <div className="app">
       <Sidebar
         user={user}
@@ -216,8 +240,8 @@ export function App() {
           <div className="spacer" />
           <div className="legend">
             <span><span className="swatch" style={{ background: 'hsl(210 70% 92%)', border: '1px solid hsl(210 65% 55%)' }} />Solved</span>
-            <span>🌙 during sleep</span>
-            <span><span className="swatch" style={{ background: '#fff', outline: '2px solid var(--danger)' }} />overlap</span>
+            <span><span className="sleep-tag">sleep</span> during sleep hours</span>
+            <span><span className="swatch" style={{ background: 'transparent', outline: '2px solid var(--danger)' }} />overlap</span>
           </div>
         </div>
 
@@ -250,5 +274,7 @@ export function App() {
         />
       ) : null}
     </div>
+    <ThemeToggle theme={theme} onToggle={toggleTheme} />
+    </>
   );
 }

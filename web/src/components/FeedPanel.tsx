@@ -1,4 +1,6 @@
 import { useState } from 'react';
+import { SectionHeader } from './SectionHeader';
+import { FeedIcon } from './icons';
 
 export function FeedPanel(props: {
   url: string | null;
@@ -32,7 +34,11 @@ export function FeedPanel(props: {
 
   return (
     <div className="section">
-      <h2>Calendar feed</h2>
+      <SectionHeader
+        icon={<FeedIcon />}
+        title="Calendar feed"
+        hint="Your private subscription URL. Add it in Google/Apple Calendar; rotate it to revoke access."
+      />
       <div className="card">
         <p className="empty-hint" style={{ marginTop: 0 }}>
           Subscribe in Google/Apple Calendar with this secret URL:
@@ -40,7 +46,7 @@ export function FeedPanel(props: {
         <input type="text" readOnly value={props.url ?? ''} onFocus={(e) => e.currentTarget.select()} />
         <div className="row" style={{ marginTop: 8 }}>
           <button className="btn tiny" onClick={copy}>
-            {copied ? '✓ Copied' : 'Copy'}
+            {copied ? 'Copied' : 'Copy'}
           </button>
           <button className="btn tiny ghost" onClick={rotate} disabled={rotating}>
             {rotating ? '…' : 'Rotate'}
