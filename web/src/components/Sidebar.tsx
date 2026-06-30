@@ -1,6 +1,7 @@
-import type { GlobalConfig, Intent, Mode } from 'calendizer';
+import type { GlobalConfig, Intent } from 'calendizer';
 import type { FeedInfo, ModeRecord, User } from '../api';
 import { colorFor } from '../lib/colors';
+import { rangeLabel } from '../lib/dates';
 import { slug, summarize } from '../lib/intentMeta';
 import { AIComposer } from './AIComposer';
 import { FeedPanel } from './FeedPanel';
@@ -18,8 +19,8 @@ interface Props {
   onNewIntent: () => void;
   onDeleteIntent: (id: string) => void;
   modes: ModeRecord[];
-  onAddMode: () => void;
-  onUpdateMode: (id: string, mode: Mode) => void;
+  onNewMode: () => void;
+  onEditMode: (mode: ModeRecord) => void;
   onDeleteMode: (id: string) => void;
   feed: FeedInfo | null;
   onRotateFeed: () => Promise<void>;
@@ -99,33 +100,26 @@ export function Sidebar(p: Props) {
           <p className="empty-hint">No modes. Add one to clear or swap intents over a date span.</p>
         ) : (
           p.modes.map((m) => (
-            <div className="mode-row" key={m.id}>
-              <div className="mode-top">
-                <input
-                  className="mode-name"
-                  defaultValue={m.name}
-                  placeholder="mode name"
-                  onBlur={(e) => p.onUpdateMode(m.id, { name: e.target.value, span: m.span })}
-                />
-                <button className="btn tiny danger" onClick={() => p.onDeleteMode(m.id)} title="Remove mode">
-                  ×
-                </button>
+            <div className="intent-row clickable" key={m.id} onClick={() => p.onEditMode(m)} title="Click to edit">
+              <div className="meta">
+                <div className="s">{m.name}</div>
+                <div className="sub">{rangeLabel(m.span[0], m.span[1])}</div>
               </div>
-              <div className="mode-dates">
-                <label className="mode-date">
-                  <span>from</span>
-                  <input defaultValue={m.span[0]} placeholder="YYYY-MM-DD" onBlur={(e) => p.onUpdateMode(m.id, { name: m.name, span: [e.target.value, m.span[1]] })} />
-                </label>
-                <label className="mode-date">
-                  <span>to</span>
-                  <input defaultValue={m.span[1]} placeholder="YYYY-MM-DD" onBlur={(e) => p.onUpdateMode(m.id, { name: m.name, span: [m.span[0], e.target.value] })} />
-                </label>
-              </div>
+              <button
+                className="btn tiny danger"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  p.onDeleteMode(m.id);
+                }}
+                title="Remove mode"
+              >
+                ×
+              </button>
             </div>
           ))
         )}
-        <button className="btn tiny" style={{ marginTop: 6 }} onClick={p.onAddMode}>
-          + add mode
+        <button className="btn tiny" style={{ marginTop: 6 }} onClick={p.onNewMode}>
+          + new mode
         </button>
       </div>
 

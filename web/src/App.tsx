@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { GlobalConfig, Intent } from 'calendizer';
+import type { GlobalConfig, Intent, Mode } from 'calendizer';
 import { api, getToken, setToken, type FeedInfo, type ModeRecord, type SolveResponse, type User } from './api';
 import { Login } from './Login';
 import { Sidebar } from './components/Sidebar';
 import { WeekCalendar } from './components/WeekCalendar';
 import { IntentEditor, blankIntent } from './components/IntentEditor';
+import { ModeEditor } from './components/ModeEditor';
 import { ThemeToggle, type Theme } from './components/ThemeToggle';
 import { addDays, mondayOf, rangeLabel, weekDates } from './lib/dates';
 
@@ -34,6 +35,7 @@ export function App() {
   const [feed, setFeed] = useState<FeedInfo | null>(null);
   const [viewWeek, setViewWeek] = useState(0);
   const [editing, setEditing] = useState<{ intent: Intent; isNew: boolean } | null>(null);
+  const [editingMode, setEditingMode] = useState<{ mode: ModeRecord | null } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const configDirty = useRef(false);
@@ -109,6 +111,12 @@ export function App() {
   }
   async function deleteIntent(id: string) {
     await guard(api.deleteIntent(id).then(reload));
+  }
+  async function saveMode(mode: Mode) {
+    if (!editingMode) return;
+    const p = editingMode.mode ? api.updateMode(editingMode.mode.id, mode) : api.createMode(mode);
+    await guard(p.then(reload));
+    setEditingMode(null);
   }
   async function aiAdd(query: string): Promise<{ explanation?: string }> {
     const res = await api.smart(query);
@@ -195,11 +203,8 @@ export function App() {
         onNewIntent={() => setEditing({ intent: blankIntent(), isNew: true })}
         onDeleteIntent={deleteIntent}
         modes={modes}
-        onAddMode={() => {
-          const start = solveResp?.horizon.start ?? mondayOf(today);
-          guard(api.createMode({ name: 'mode', span: [start, addDays(start, 6)] }).then(reload));
-        }}
-        onUpdateMode={(id, mode) => guard(api.updateMode(id, mode).then(reload))}
+        onNewMode={() => setEditingMode({ mode: null })}
+        onEditMode={(m) => setEditingMode({ mode: m })}
         onDeleteMode={(id) => guard(api.deleteMode(id).then(reload))}
         feed={feed}
         onRotateFeed={rotateFeed}
@@ -259,6 +264,20 @@ export function App() {
           onSave={saveEditing}
           onCancel={() => setEditing(null)}
           onSmartEdit={(intent, instruction) => api.smartEdit(intent, instruction)}
+        />
+      ) : null}
+
+      {editingMode ? (
+        <ModeEditor
+          key={editingMode.mode?.id ?? 'new-mode'}
+          initial={
+            editingMode.mode
+              ? { name: editingMode.mode.name, span: editingMode.mode.span }
+              : { name: '', span: [solveResp?.horizon.start ?? mondayOf(today), addDays(solveResp?.horizon.start ?? mondayOf(today), 6)] }
+          }
+          isNew={!editingMode.mode}
+          onSave={saveMode}
+          onCancel={() => setEditingMode(null)}
         />
       ) : null}
     </div>
