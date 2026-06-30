@@ -133,15 +133,16 @@ label.field span { display: block; margin-bottom: 3px; }
 .empty-hint { font-size: 12px; color: var(--muted); font-style: italic; }
 
 .mode-row {
-  background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px;
-  padding: 8px 10px; margin-bottom: 6px;
+  background: var(--surface-2); border: 1px solid var(--line); border-radius: 10px;
+  padding: 10px; margin-bottom: 8px;
 }
 .mode-top { display: flex; gap: 8px; align-items: center; }
-.mode-row .mode-name { flex: 1; font-weight: 600; font-size: 13px; }
-.mode-dates { display: flex; gap: 8px; margin-top: 6px; }
-.mode-date { flex: 1; }
-.mode-date span { display: block; font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); margin-bottom: 2px; }
-.mode-date input { font-size: 12px; padding: 4px 6px; }
+.mode-row .mode-name { flex: 1; min-width: 0; font-weight: 600; font-size: 13px; }
+.mode-top .btn { flex: 0 0 auto; }
+.mode-dates { display: flex; gap: 8px; margin-top: 8px; }
+.mode-date { flex: 1 1 0; min-width: 0; }
+.mode-date span { display: block; font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); margin-bottom: 3px; }
+.mode-date input { width: 100%; font-size: 12px; padding: 5px 7px; }
 
 /* ---------------- Main ---------------- */
 .main { display: flex; flex-direction: column; overflow: hidden; background: var(--panel); }
