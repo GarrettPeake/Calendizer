@@ -182,6 +182,34 @@ Feature: Filling flexible counts toward their max (fillToMax)
     And every occurrence of "pottery" lasts 60 minutes
     And there are no conflicts
 
+  Scenario: A contended flexible task grows up to a mid-window obstacle (not back to its floor)
+    # pottery shares the day with workout (contended), and a fixed event intrudes at
+    # 18:55. pottery should grow to fill 17:00-18:55, not collapse to its 60-min floor.
+    Given fill toward max is enabled
+    And an existing fixed event "gathering" on "2026-07-07" from "18:55" to "20:00"
+    When I add the intents:
+      """
+      [
+        {
+          "subject": "pottery", "mode": "default", "priority": 50,
+          "duration": [60, 120],
+          "window": { "not_before": "17:00", "not_after": "19:00" },
+          "cardinality": { "days": { "dates": ["2026-07-07"] } }
+        },
+        {
+          "subject": "workout", "mode": "default", "priority": 50,
+          "duration": [30, 60],
+          "window": { "not_before": "07:00", "not_after": "23:00" },
+          "cardinality": { "days": { "dates": ["2026-07-07"] } }
+        }
+      ]
+      """
+    And I solve
+    Then the occurrence of "pottery" on "2026-07-07" runs from "17:00" to "18:55"
+    And every occurrence of "pottery" lasts 115 minutes
+    And no occurrence overlaps the fixed event "gathering"
+    And there are no conflicts
+
   Scenario: Extras fill each week across a multi-week horizon
     Given the planning horizon is "2026-07-06" to "2026-07-19"
     And fill toward max is enabled

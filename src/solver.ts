@@ -463,15 +463,22 @@ function distributeDurations(placements: Placement[], fixed: Occupied[], config:
         slack -= add;
       }
 
-      // Re-pack the group, highest priority first, into the free gaps.
+      // Re-pack the group, highest priority first, into the free gaps. Each event
+      // takes the first gap its FLOOR fits, then grows toward its allotted duration
+      // bounded by that gap — so a mid-window obstacle (e.g. an early sunset) just
+      // trims the event instead of collapsing it back to the floor.
       let ii = 0;
       let cursor = free.length ? free[0][0] : ws;
       for (const p of order) {
-        const d = dur.get(p)!;
+        const target = dur.get(p)!;
+        const floor = p.intent.duration[0];
         const { nb, na } = win.get(p)!;
         while (ii < free.length) {
-          let s = ceilTo(Math.max(cursor, free[ii][0], nb), grid);
-          if (s + d <= Math.min(free[ii][1], na)) {
+          const s = ceilTo(Math.max(cursor, free[ii][0], nb), grid);
+          const gapEnd = Math.min(free[ii][1], na);
+          if (s + floor <= gapEnd) {
+            const end = Math.floor(Math.min(s + target, gapEnd) / grid) * grid;
+            const d = Math.max(floor, end - s);
             p.startMin = s;
             p.durationMin = d;
             p.placedDuringSleep = isInSleep(s, d, date, config);
