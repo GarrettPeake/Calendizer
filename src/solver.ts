@@ -389,14 +389,19 @@ function distributeDurations(placements: Placement[], fixed: Occupied[], config:
   const grid = Math.max(1, config.grid);
   const byDay = new Map<ISODate, Placement[]>();
   for (const p of placements) {
-    if (p.pinned) continue;
     if (p.intent.duration[1] <= p.intent.duration[0]) continue; // fixed length
     const arr = byDay.get(p.date) ?? [];
     arr.push(p);
     byDay.set(p.date, arr);
   }
 
-  for (const [date, flex] of byDay) {
+  for (const [date, dayFlex] of byDay) {
+    // A pinned occurrence keeps its fixed start but may still grow its DURATION;
+    // grow it in place first (it then anchors the non-pinned re-pack). Only the
+    // non-pinned occurrences are grouped/re-packed (which may move their starts).
+    for (const p of dayFlex) if (p.pinned) growInPlace(p, date, placements, fixed, config, origin);
+    const flex = dayFlex.filter((p) => !p.pinned);
+    if (flex.length === 0) continue;
     const win = new Map<Placement, { nb: number; na: number }>();
     for (const p of flex) {
       const w = resolveWindow(p.intent.window, date, config);
@@ -512,7 +517,6 @@ function growInPlace(
   config: GlobalConfig,
   origin: ISODate
 ): void {
-  const grid = Math.max(1, config.grid);
   const padding = config.padding ?? 0;
   const start = p.startMin;
   const w = resolveWindow(p.intent.window, date, config);
@@ -533,9 +537,11 @@ function growInPlace(
   const { sleepStart } = resolveSleepBlackout(date, config);
   if (start < sleepStart) limit = Math.min(limit, sleepStart);
 
-  const maxEnd = Math.min(start + p.intent.duration[1], limit);
-  const newEnd = Math.floor(maxEnd / grid) * grid; // keep the end grid-aligned
-  const newDur = newEnd - start;
+  // Grow toward the duration max, bounded by the room available. We cap by the
+  // exact limit rather than snapping to the grid: starts are grid-aligned but a
+  // marker-pinned start (e.g. sunset) isn't, and snapping the end would strand a
+  // few minutes below the max the user asked for.
+  const newDur = Math.min(p.intent.duration[1], limit - start);
   if (newDur > p.durationMin) {
     p.durationMin = newDur;
     p.placedDuringSleep = isInSleep(start, newDur, date, config);

@@ -239,6 +239,41 @@ Feature: Filling flexible counts toward their max (fillToMax)
     And no occurrence is marked as placed during sleep
     And there are no conflicts
 
+  Scenario: A pinned (fixed-start) task still grows its duration to the max
+    # A starts_at pin fixes the START, but the duration should still fill toward the
+    # max when there's room after it.
+    Given fill toward max is enabled
+    When I add the intent:
+      """
+      {
+        "subject": "sunset walk", "mode": "default", "priority": 50,
+        "duration": [40, 60],
+        "window": { "starts_at": "18:00" },
+        "cardinality": { "days": { "dates": ["2026-07-07"] } }
+      }
+      """
+    And I solve
+    Then the occurrence of "sunset walk" on "2026-07-07" runs from "18:00" to "19:00"
+    And every occurrence of "sunset walk" lasts 60 minutes
+    And there are no conflicts
+
+  Scenario: A pinned task grows only up to a following obstacle
+    Given fill toward max is enabled
+    And an existing fixed event "dinner" on "2026-07-07" from "18:45" to "20:00"
+    When I add the intent:
+      """
+      {
+        "subject": "sunset walk", "mode": "default", "priority": 50,
+        "duration": [40, 60],
+        "window": { "starts_at": "18:00" },
+        "cardinality": { "days": { "dates": ["2026-07-07"] } }
+      }
+      """
+    And I solve
+    Then the occurrence of "sunset walk" on "2026-07-07" runs from "18:00" to "18:45"
+    And no occurrence overlaps the fixed event "dinner"
+    And there are no conflicts
+
   Scenario: Extras fill each week across a multi-week horizon
     Given the planning horizon is "2026-07-06" to "2026-07-19"
     And fill toward max is enabled
