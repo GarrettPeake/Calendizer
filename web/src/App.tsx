@@ -37,7 +37,10 @@ export function App() {
   const [modes, setModes] = useState<ModeRecord[]>([]);
   const [solveResp, setSolveResp] = useState<SolveResponse | null>(null);
   const [feed, setFeed] = useState<FeedInfo | null>(null);
-  const [viewWeek, setViewWeek] = useState(0);
+  // The viewed week is tracked by its Monday date (not an index): the horizon now
+  // starts ~3 months in the past, so an index is fragile — index 0 is the empty
+  // past, and any horizon shift would silently move which week an index points at.
+  const [viewMonday, setViewMonday] = useState('');
   const [editing, setEditing] = useState<{ intent: Intent; isNew: boolean } | null>(null);
   const [editingMode, setEditingMode] = useState<{ mode: ModeRecord | null } | null>(null);
   const [bugOpen, setBugOpen] = useState(false);
@@ -46,7 +49,6 @@ export function App() {
   const [geoDismissed, setGeoDismissed] = useState<string>(() => localStorage.getItem('calendizer_geo_dismissed') ?? '');
 
   const configDirty = useRef(false);
-  const initialWeekSet = useRef(false);
 
   /* ---------------- boot: validate token, load everything ---------------- */
   useEffect(() => {
@@ -179,7 +181,7 @@ export function App() {
     setIntents([]);
     setModes([]);
     setSolveResp(null);
-    initialWeekSet.current = false;
+    setViewMonday('');
   }
 
   /* ---------------- derived: weeks + today ---------------- */
@@ -202,15 +204,18 @@ export function App() {
     return out;
   }, [solveResp]);
 
-  // Land on the current week the first time a solve arrives.
+  const currentMonday = useMemo(() => mondayOf(today), [today]);
+
+  // Land on the current week, and re-land only if the view falls outside the
+  // available range (e.g. horizon rolled). Manual navigation within range sticks.
   useEffect(() => {
-    if (!initialWeekSet.current && mondays.length) {
-      const tm = mondayOf(today);
-      const idx = Math.max(0, mondays.findIndex((m) => m === tm));
-      setViewWeek(idx >= 0 ? idx : 0);
-      initialWeekSet.current = true;
+    if (!mondays.length) return;
+    const first = mondays[0];
+    const last = mondays[mondays.length - 1];
+    if (!viewMonday || viewMonday < first || viewMonday > last) {
+      setViewMonday(currentMonday >= first && currentMonday <= last ? currentMonday : first);
     }
-  }, [mondays, today]);
+  }, [mondays, currentMonday, viewMonday]);
 
   if (booting)
     return (
@@ -232,8 +237,20 @@ export function App() {
       </>
     );
 
-  const safeWeek = Math.min(viewWeek, Math.max(0, mondays.length - 1));
-  const days = mondays.length ? weekDates(mondays[safeWeek]) : [];
+  // The effective viewed Monday, with an inline fallback to the current week so we
+  // never render the empty past even before the landing effect runs.
+  const first = mondays[0];
+  const last = mondays[mondays.length - 1];
+  const effMonday =
+    viewMonday && viewMonday >= first && viewMonday <= last
+      ? viewMonday
+      : currentMonday >= first && currentMonday <= last
+        ? currentMonday
+        : first;
+  const weekIdx = mondays.indexOf(effMonday);
+  const atFirst = weekIdx <= 0;
+  const atLast = weekIdx >= mondays.length - 1;
+  const days = mondays.length ? weekDates(effMonday) : [];
   const conflicts = (solveResp?.conflicts ?? []).filter(
     (c) => !c.date || (days.length > 0 && c.date >= days[0] && c.date <= days[6])
   );
@@ -269,19 +286,15 @@ export function App() {
           <DetectBanner proposal={geoProposal} onApply={applyGeo} onDismiss={dismissGeo} />
         ) : null}
         <div className="toolbar">
-          <button className="nav-btn" onClick={() => setViewWeek((w) => Math.max(0, w - 1))} disabled={safeWeek === 0}>
+          <button className="nav-btn" onClick={() => setViewMonday(addDays(effMonday, -7))} disabled={atFirst}>
             ‹
           </button>
-          <button
-            className="nav-btn"
-            onClick={() => setViewWeek((w) => Math.min(mondays.length - 1, w + 1))}
-            disabled={safeWeek >= mondays.length - 1}
-          >
+          <button className="nav-btn" onClick={() => setViewMonday(addDays(effMonday, 7))} disabled={atLast}>
             ›
           </button>
           <div className="week-label">{days.length ? rangeLabel(days[0], days[6]) : '—'}</div>
           <span className="pill">
-            Week {safeWeek + 1} of {mondays.length}
+            Week {weekIdx + 1} of {mondays.length}
           </span>
           <div className="spacer" />
           <div className="legend">
