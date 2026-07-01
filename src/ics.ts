@@ -30,7 +30,10 @@ export function renderICS(instances: Instance[], calName = 'Calendizer', utcOffs
   // renders at the intended wall-clock time regardless of the viewer's timezone.
   const useTz = typeof utcOffsetMinutes === 'number' && Number.isFinite(utcOffsetMinutes);
   const off = useTz ? formatOffset(utcOffsetMinutes as number) : '';
-  const tzid = useTz ? `Calendizer/UTC${off.slice(0, 3)}:${off.slice(3)}` : '';
+  // No colon in the TZID: an unquoted colon in a property PARAMETER value (e.g.
+  // `DTSTART;TZID=...:VALUE`) ends the parameter, so parsers would read a
+  // truncated TZID and a garbage value — and drop every event.
+  const tzid = useTz ? `Calendizer/UTC${off}` : '';
   const dtProp = (name: 'DTSTART' | 'DTEND', dt: string) =>
     useTz ? `${name};TZID=${tzid}:${toICSStamp(dt)}` : `${name}:${toICSStamp(dt)}`;
 

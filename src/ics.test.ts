@@ -21,20 +21,23 @@ const inst = (over: Partial<Instance> = {}): Instance => ({
 test('with an offset: emits a fixed-offset VTIMEZONE and TZID-tagged times (not floating)', () => {
   const ics = renderICS([inst()], 'Calendizer', -420);
   assert.match(ics, /BEGIN:VTIMEZONE/);
-  assert.match(ics, /TZID:Calendizer\/UTC-07:00/);
+  assert.match(ics, /TZID:Calendizer\/UTC-0700/);
   assert.match(ics, /TZOFFSETTO:-0700/);
   // The wall-clock time is preserved and tagged with the zone — never a bare
   // floating DTSTART (which Google would misread as UTC and shift by the offset).
-  assert.match(ics, /DTSTART;TZID=Calendizer\/UTC-07:00:20260703T221500/);
-  assert.match(ics, /DTEND;TZID=Calendizer\/UTC-07:00:20260703T233000/);
+  assert.match(ics, /DTSTART;TZID=Calendizer\/UTC-0700:20260703T221500/);
+  assert.match(ics, /DTEND;TZID=Calendizer\/UTC-0700:20260703T233000/);
   assert.doesNotMatch(ics, /DTSTART:20260703/);
+  // The TZID must contain no colon: an unquoted colon in a parameter value would
+  // truncate the TZID and corrupt the time value, and viewers would drop events.
+  assert.doesNotMatch(ics, /UTC-07:00/);
 });
 
 test('positive offset formats correctly (e.g. +05:30)', () => {
   const ics = renderICS([inst()], 'Calendizer', 330);
-  assert.match(ics, /TZID:Calendizer\/UTC\+05:30/);
+  assert.match(ics, /TZID:Calendizer\/UTC\+0530/);
   assert.match(ics, /TZOFFSETTO:\+0530/);
-  assert.match(ics, /DTSTART;TZID=Calendizer\/UTC\+05:30:20260703T221500/);
+  assert.match(ics, /DTSTART;TZID=Calendizer\/UTC\+0530:20260703T221500/);
 });
 
 test('without an offset: falls back to floating times, no VTIMEZONE', () => {
@@ -50,5 +53,5 @@ test('children render as TZID-tagged VEVENTs too', () => {
     -420
   );
   assert.match(ics, /SUMMARY:Read/);
-  assert.match(ics, /DTSTART;TZID=Calendizer\/UTC-07:00:20260703T221800/);
+  assert.match(ics, /DTSTART;TZID=Calendizer\/UTC-0700:20260703T221800/);
 });
