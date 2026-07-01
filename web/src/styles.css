@@ -226,6 +226,8 @@ label.field span { display: block; margin-bottom: 3px; }
 .evt .kids { margin-top: 2px; font-size: 9.5px; opacity: 0.85; }
 .evt.fixed { background: var(--surface-2); border-left-color: var(--muted); color: var(--ink); }
 .evt.overlap { outline: 2px solid var(--danger); outline-offset: -2px; }
+/* Elapsed (frozen) occurrences read as settled history, not planned. */
+.evt.past { opacity: 0.5; box-shadow: none; }
 
 /* "placed during sleep" marker — a small text tag, not an icon/emoji */
 .sleep-tag {

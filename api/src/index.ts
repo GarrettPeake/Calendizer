@@ -1,8 +1,9 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import type { Env, Vars } from './env';
-import type { GlobalConfig, Intent, Mode, ValidationResult } from '../../src/index';
+import type { GlobalConfig, Instance, Intent, Mode, ValidationResult } from '../../src/index';
 import { validateIntent, validateMode, validateConfig, validateCredentials } from '../../src/index';
+import { localNow } from '../../src/time';
 import { hashPassword, verifyPassword, signToken, verifyToken } from './auth';
 import * as repo from './repo';
 import { getSolved } from './solveService';
@@ -32,7 +33,23 @@ function publicUser(u: repo.UserRow) {
   return { id: u.id, username: u.username };
 }
 async function invalidate(c: any) {
-  await repo.invalidateCache(c.env.DB, c.get('userId'));
+  const db = c.env.DB;
+  const userId = c.get('userId');
+  // Freeze the elapsed slice of the current projection BEFORE discarding it, so
+  // the immutable past survives an edit made before the next read (closes the
+  // edit-before-reread race where a fresh solve could otherwise rewrite history).
+  const cache = await repo.getCache(db, userId);
+  if (cache) {
+    const config = await repo.getConfig(db, userId);
+    const nowDT = localNow(config.utcOffsetMinutes ?? 0);
+    const instances: Instance[] = JSON.parse(cache.instances_json);
+    await repo.freezeInstances(
+      db,
+      userId,
+      instances.filter((i) => i.start < nowDT)
+    );
+  }
+  await repo.invalidateCache(db, userId);
 }
 /** First blocking error message, or null. Server rejects on errors; warnings pass. */
 function firstError(r: ValidationResult): string | null {

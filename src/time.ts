@@ -65,6 +65,32 @@ export function monthKey(d: ISODate): string {
   return d.slice(0, 7);
 }
 
+/** Monday of the ISO week containing `d`. */
+export function startOfISOWeek(d: ISODate): ISODate {
+  const dt = parseDate(d);
+  const back = (dt.getUTCDay() + 6) % 7; // 0 = Monday
+  return addDays(d, -back);
+}
+
+/** First day of the month containing `d`. */
+export function startOfMonth(d: ISODate): ISODate {
+  return `${d.slice(0, 7)}-01`;
+}
+
+/**
+ * Current local wall-clock as an `YYYY-MM-DDTHH:MM` string in the user's fixed
+ * UTC offset. Comparable directly against `Instance.start` (same shape/tz-free).
+ */
+export function localNow(utcOffsetMinutes = 0): ISODateTime {
+  const shifted = new Date(Date.now() + utcOffsetMinutes * 60_000);
+  const y = shifted.getUTCFullYear();
+  const m = String(shifted.getUTCMonth() + 1).padStart(2, '0');
+  const d = String(shifted.getUTCDate()).padStart(2, '0');
+  const hh = String(shifted.getUTCHours()).padStart(2, '0');
+  const mm = String(shifted.getUTCMinutes()).padStart(2, '0');
+  return `${y}-${m}-${d}T${hh}:${mm}`;
+}
+
 /** Minutes-from-midnight → `HH:MM`. Clamps within a single day for display. */
 export function minutesToHHMM(min: number): string {
   const m = ((min % 1440) + 1440) % 1440;

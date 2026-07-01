@@ -119,11 +119,13 @@ export function WeekCalendar(props: {
   fixed: CalendarEvent[];
   instances: Instance[];
   today: string;
+  /** Current local wall-clock as "YYYY-MM-DDTHH:MM"; events before it read as settled. */
+  now?: string;
   modes?: ModeSpan[];
   wakeup?: TimeValue;
   sleep?: TimeValue;
 }) {
-  const { days, fixed, instances, today, modes = [] } = props;
+  const { days, fixed, instances, today, now, modes = [] } = props;
   const dayset = new Set(days);
 
   // Which modes cover each visible day (a day can sit inside several spans).
@@ -235,6 +237,7 @@ export function WeekCalendar(props: {
                 const lane = e._lane ?? 0;
                 const widthPct = 100 / lanes;
                 const col = e.kind === 'instance' ? colorFor(e.intentId ?? e.subject) : null;
+                const past = now ? `${e.date}T${fmt(e.startMin)}` < now : false;
                 // Real height, but at least MIN_EVT_PX for readability — clamped so
                 // it never overflows into the next event sharing this lane.
                 const realPx = (e.endMin - e.startMin) * PX;
@@ -250,7 +253,7 @@ export function WeekCalendar(props: {
                 return (
                   <div
                     key={e.uid}
-                    className={`evt ${e.kind}${e._overlap ? ' overlap' : ''}`}
+                    className={`evt ${e.kind}${e._overlap ? ' overlap' : ''}${past ? ' past' : ''}`}
                     style={style}
                     title={`${e.subject}\n${fmt(e.startMin)}–${fmt(e.endMin)}${
                       e.children?.length ? '\n' + e.children.map((c) => `• ${c.subject}`).join('\n') : ''

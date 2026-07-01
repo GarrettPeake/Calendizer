@@ -1,7 +1,7 @@
 /**
  * D1 data access + mappers between rows and the shared library types.
  */
-import type { GlobalConfig, Intent, Mode } from '../../src/index';
+import type { GlobalConfig, Instance, Intent, Mode } from '../../src/index';
 
 export interface UserRow {
   id: string;
@@ -220,6 +220,79 @@ export async function setCache(db: D1Database, row: SolveCacheRow): Promise<void
 /** Mark the cached solve dirty — called after any input change. */
 export async function invalidateCache(db: D1Database, userId: string): Promise<void> {
   await db.prepare(`UPDATE solve_cache SET stale = 1 WHERE user_id = ?`).bind(userId).run();
+}
+
+/* ----------------------------- frozen (immutable) past ----------------------------- */
+
+interface FrozenRow {
+  uid: string;
+  intent_id: string;
+  subject: string;
+  date: string;
+  start: string;
+  end: string;
+  duration_min: number;
+  children_json: string | null;
+  placed_during_sleep: number;
+}
+
+function rowToInstance(r: FrozenRow): Instance {
+  const inst: Instance = {
+    uid: r.uid,
+    intentId: r.intent_id,
+    subject: r.subject,
+    date: r.date,
+    start: r.start,
+    end: r.end,
+    durationMin: r.duration_min,
+  };
+  if (r.children_json) inst.children = JSON.parse(r.children_json);
+  if (r.placed_during_sleep) inst.placedDuringSleep = true;
+  return inst;
+}
+
+/** Frozen occurrences on or after `sinceDate` (retention window), oldest first. */
+export async function listFrozen(db: D1Database, userId: string, sinceDate: string): Promise<Instance[]> {
+  const res = await db
+    .prepare(
+      `SELECT uid, intent_id, subject, date, start, end, duration_min, children_json, placed_during_sleep
+         FROM frozen_instances WHERE user_id = ? AND date >= ? ORDER BY start`
+    )
+    .bind(userId, sinceDate)
+    .all<FrozenRow>();
+  return (res.results ?? []).map(rowToInstance);
+}
+
+/** Persist elapsed occurrences immutably. INSERT OR IGNORE: a uid is frozen once. */
+export async function freezeInstances(db: D1Database, userId: string, instances: Instance[]): Promise<void> {
+  if (instances.length === 0) return;
+  const ts = now();
+  const stmt = db.prepare(
+    `INSERT OR IGNORE INTO frozen_instances
+       (user_id, uid, intent_id, subject, date, start, end, duration_min, children_json, placed_during_sleep, frozen_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  );
+  const batch = instances.map((i) =>
+    stmt.bind(
+      userId,
+      i.uid,
+      i.intentId,
+      i.subject,
+      i.date,
+      i.start,
+      i.end,
+      i.durationMin,
+      i.children ? JSON.stringify(i.children) : null,
+      i.placedDuringSleep ? 1 : 0,
+      ts
+    )
+  );
+  await db.batch(batch);
+}
+
+/** Drop frozen rows older than the retention window. */
+export async function pruneFrozen(db: D1Database, userId: string, beforeDate: string): Promise<void> {
+  await db.prepare(`DELETE FROM frozen_instances WHERE user_id = ? AND date < ?`).bind(userId, beforeDate).run();
 }
 
 export async function recordMetric(

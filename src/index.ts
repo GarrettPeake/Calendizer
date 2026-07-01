@@ -14,6 +14,7 @@ export { solarTimes } from './solar';
 export { expandIntent } from './expand';
 export { tileChildren } from './children';
 export { activeModeOn, isIntentActiveOn, detectModeOverlaps } from './modes';
+export { alignHorizonStart, overlay, isFullyPassed } from './temporal';
 export {
   validateIntent,
   validateMode,

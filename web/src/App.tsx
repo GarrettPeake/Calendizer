@@ -187,6 +187,10 @@ export function App() {
     () => new Date(Date.now() + (config?.utcOffsetMinutes ?? 0) * 60_000).toISOString().slice(0, 10),
     [config]
   );
+  const now = useMemo(
+    () => new Date(Date.now() + (config?.utcOffsetMinutes ?? 0) * 60_000).toISOString().slice(0, 16),
+    [config]
+  );
   const mondays = useMemo(() => {
     if (!solveResp) return [];
     const out: string[] = [];
@@ -306,6 +310,7 @@ export function App() {
           fixed={NO_FIXED}
           instances={solveResp?.instances ?? []}
           today={today}
+          now={now}
           modes={modes}
           wakeup={config?.wakeup}
           sleep={config?.sleep}
