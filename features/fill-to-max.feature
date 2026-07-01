@@ -274,6 +274,36 @@ Feature: Filling flexible counts toward their max (fillToMax)
     And no occurrence overlaps the fixed event "dinner"
     And there are no conflicts
 
+  Scenario: A lower-priority fixed-duration filler yields its spot so a flexible neighbour reaches its max
+    # An open-window, fixed-length game session (prio 45) and a flexible workout
+    # (prio 50) both prefer the morning. The workout must reach its 60-min max; the
+    # game — movable, lower priority — slides to right after it instead of boxing the
+    # workout into its 30-min floor.
+    Given fill toward max is enabled
+    When I add the intents:
+      """
+      [
+        {
+          "subject": "workout", "mode": "default", "priority": 50,
+          "duration": [30, 60],
+          "window": { "not_before": "07:00", "not_after": "23:00" },
+          "cardinality": { "days": { "dates": ["2026-07-07"] } }
+        },
+        {
+          "subject": "game", "mode": "default", "priority": 45,
+          "duration": [180, 180],
+          "window": {},
+          "cardinality": { "days": { "dates": ["2026-07-07"] } }
+        }
+      ]
+      """
+    And I solve
+    Then the occurrence of "workout" on "2026-07-07" runs from "07:00" to "08:00"
+    And every occurrence of "workout" lasts 60 minutes
+    And the occurrence of "game" on "2026-07-07" runs from "08:00" to "11:00"
+    And no two occurrences overlap
+    And there are no conflicts
+
   Scenario: Extras fill each week across a multi-week horizon
     Given the planning horizon is "2026-07-06" to "2026-07-19"
     And fill toward max is enabled

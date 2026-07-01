@@ -407,7 +407,12 @@ function distributeDurations(placements: Placement[], fixed: Occupied[], config:
   const grid = Math.max(1, config.grid);
   const byDay = new Map<ISODate, Placement[]>();
   for (const p of placements) {
-    if (p.intent.duration[1] <= p.intent.duration[0]) continue; // fixed length
+    // A pinned, fixed-length occurrence can neither grow nor move — leave it as a
+    // pure obstacle. Everything else participates: flexible-duration events grow,
+    // and non-pinned FIXED-length events (e.g. a 3h game session with an open
+    // window) can still be re-packed so they yield their spot to a higher-priority
+    // flexible neighbour that would otherwise be boxed into its floor.
+    if (p.pinned && p.intent.duration[1] <= p.intent.duration[0]) continue;
     const arr = byDay.get(p.date) ?? [];
     arr.push(p);
     byDay.set(p.date, arr);
