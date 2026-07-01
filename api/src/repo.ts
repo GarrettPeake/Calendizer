@@ -248,3 +248,46 @@ export async function listMetrics(db: D1Database, userId: string, limit = 50): P
     .all<MetricRow>();
   return res.results ?? [];
 }
+
+/* ----------------------------- bug reports ----------------------------- */
+
+export interface BugReportInput {
+  description: string;
+  clientDatetime?: string;
+  timezone?: string;
+  config: unknown;
+  weekStart?: string;
+  weekEnd?: string;
+  schedule: unknown;
+}
+
+export async function createBugReport(
+  db: D1Database,
+  userId: string,
+  username: string,
+  r: BugReportInput
+): Promise<{ id: string; createdAt: string }> {
+  const id = crypto.randomUUID();
+  const createdAt = now();
+  await db
+    .prepare(
+      `INSERT INTO bug_reports
+         (id, user_id, username, description, client_datetime, timezone, config_json, week_start, week_end, schedule_json, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+    .bind(
+      id,
+      userId,
+      username,
+      r.description,
+      r.clientDatetime ?? null,
+      r.timezone ?? null,
+      JSON.stringify(r.config ?? null),
+      r.weekStart ?? null,
+      r.weekEnd ?? null,
+      JSON.stringify(r.schedule ?? null),
+      createdAt
+    )
+    .run();
+  return { id, createdAt };
+}

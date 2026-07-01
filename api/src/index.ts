@@ -285,6 +285,35 @@ app.get('/api/metrics', requireAuth, async (c) => {
   return c.json({ recent, lastMs, avgMs });
 });
 
+/* --------------------------------- bug reports --------------------------------- */
+
+app.post('/api/bugs', requireAuth, async (c) => {
+  const body = (await c.req.json().catch(() => ({}))) as {
+    description?: string;
+    clientDatetime?: string;
+    timezone?: string;
+    config?: unknown;
+    weekStart?: string;
+    weekEnd?: string;
+    schedule?: unknown;
+  };
+  const description = (body.description || '').trim();
+  if (!description) return c.json({ error: 'A description is required' }, 400);
+
+  const userId = c.get('userId');
+  const user = await repo.getUserById(c.env.DB, userId);
+  const saved = await repo.createBugReport(c.env.DB, userId, user?.username ?? '', {
+    description,
+    clientDatetime: body.clientDatetime,
+    timezone: body.timezone,
+    config: body.config ?? null,
+    weekStart: body.weekStart,
+    weekEnd: body.weekEnd,
+    schedule: body.schedule ?? [],
+  });
+  return c.json({ ok: true, id: saved.id }, 201);
+});
+
 /* --------------------------------- feed mgmt + public feed --------------------------------- */
 
 app.get('/api/feed', requireAuth, async (c) => {

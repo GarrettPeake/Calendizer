@@ -65,3 +65,9 @@ export const MoonIcon = (p: SVGProps<SVGSVGElement>) => (
     <path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8Z" />
   </svg>
 );
+export const BugIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <rect x="8" y="6" width="8" height="14" rx="4" />
+    <path d="M12 2a3 3 0 0 0-3 3M12 2a3 3 0 0 1 3 3M3 9l3 1M21 9l-3 1M2 15h4M18 15h4M4 21l3-2M20 21l-3-2M12 6v14" />
+  </svg>
+);

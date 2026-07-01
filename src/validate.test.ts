@@ -52,10 +52,12 @@ test('duration: cannot fit a clock-bounded window', () => {
   assert.ok(hasErr(r, 'duration'));
 });
 
-test('window: inverted clock bounds block; pin warns; bad clock blocks', () => {
+test('window: inverted clock bounds block; bad clock blocks; marker+clock does not warn', () => {
   assert.ok(hasErr(validateIntent(baseIntent({ window: { not_before: '20:00', not_after: '08:00' } })), 'window'));
-  assert.ok(hasWarn(validateIntent(baseIntent({ window: { starts_at: '09:00', not_before: '08:00' } })), 'window.starts_at'));
   assert.ok(hasErr(validateIntent(baseIntent({ window: { not_before: '9am' } })), 'window'));
+  // a wakeup(marker)→22:00(clock) window is fine — no noisy "may be too short" warning
+  const r = validateIntent(baseIntent({ duration: [60, 60], window: { not_before: { marker: 'wakeup' }, not_after: '22:00' } }));
+  assert.ok(!hasWarn(r, 'duration'));
 });
 
 test('interval below 1 blocks', () => {

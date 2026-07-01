@@ -133,22 +133,18 @@ export function validateIntent(intent: Intent, ctx: IntentValidationContext = {}
   if (nb != null && na != null && nb > na) {
     b.err('window.not_after', "'Can't start before' must be earlier than 'Can't end after'.");
   }
-  // Min duration can't fit a clock-bounded window.
+  // Min duration can't fit a clock-bounded window. (Marker-relative bounds resolve
+  // per-date, so we only flag the case where both bounds are concrete clock times;
+  // a marker window that truly can't fit surfaces as a solver conflict instead.)
   if (isInt(dMin) && dMin > 0) {
     const lo = nb ?? (isMarker(win.not_before) ? null : 0);
     const hi = na ?? (isMarker(win.not_after) ? null : 1440);
     if (lo != null && hi != null && hi - lo < dMin) {
       b.err('duration', 'This won’t fit: the allowed window is shorter than the minimum duration.');
-    } else if ((isMarker(win.not_before) || isMarker(win.not_after)) && (nb != null || na != null)) {
-      // one clock bound + one marker bound — can only warn
-      b.warn('duration', 'Depending on the marker, this window may be too short for the minimum duration.');
     }
   }
-  // Pinned start overrides the window bounds.
-  const pinned = win.starts_at != null && !(typeof win.starts_at === 'string' && win.starts_at === '');
-  if (pinned && (win.not_before != null || win.not_after != null)) {
-    b.warn('window.starts_at', 'A fixed start time overrides the start/end window — those bounds are ignored.');
-  }
+  // (The "pinned start overrides the window" notice is shown contextually by the
+  //  editor, which also greys out those bounds — no validator warning needed.)
   // Window fully inside the sleep blackout.
   if (ctx.config) {
     const wake = clockMinutes(ctx.config.wakeup);

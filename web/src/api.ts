@@ -102,6 +102,17 @@ export const api = {
   geo: () =>
     req<{ lat?: number; lon?: number; city?: string; region?: string; country?: string; timezone?: string }>('GET', '/geo'),
 
+  // bug reports
+  reportBug: (payload: {
+    description: string;
+    clientDatetime: string;
+    timezone: string;
+    config: GlobalConfig | null;
+    weekStart: string;
+    weekEnd: string;
+    schedule: Instance[];
+  }) => req<{ ok: boolean; id: string }>('POST', '/bugs', payload),
+
   // solve + metrics + feed
   solve: () => req<SolveResponse>('GET', '/solve'),
   metrics: () => req<MetricsResponse>('GET', '/metrics'),

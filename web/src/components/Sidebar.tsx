@@ -9,7 +9,7 @@ import { CITIES, findCity, tzOffsetMinutes } from '../data/cities';
 import { AIComposer } from './AIComposer';
 import { FeedPanel } from './FeedPanel';
 import { SectionHeader } from './SectionHeader';
-import { LayersIcon, ListIcon, SlidersIcon } from './icons';
+import { BugIcon, LayersIcon, ListIcon, SlidersIcon } from './icons';
 
 interface Props {
   user: User;
@@ -27,6 +27,7 @@ interface Props {
   onDeleteMode: (id: string) => void;
   feed: FeedInfo | null;
   onRotateFeed: () => Promise<void>;
+  onReportBug: () => void;
   solveMs: number | null;
   instanceCount: number;
   cached: boolean | null;
@@ -136,6 +137,13 @@ export function Sidebar(p: Props) {
         instanceCount={p.instanceCount}
         cached={p.cached}
       />
+
+      <div className="report-bug-row">
+        <button className="btn tiny ghost report-bug" onClick={p.onReportBug} title="Report a problem with your schedule">
+          <BugIcon />
+          Report a bug
+        </button>
+      </div>
     </aside>
   );
 }

@@ -282,12 +282,13 @@ label.field span { display: block; margin-bottom: 3px; }
 .edit-group legend { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); padding: 0 6px; }
 .edit-field { display: block; margin: 8px 0; }
 .edit-field > span { display: block; font-size: 11px; color: var(--muted); margin-bottom: 3px; }
-.modal .edit-field input, .modal .edit-field select,
+.modal .edit-field input, .modal .edit-field select, .modal .edit-field textarea,
 .modal .child-row input, .modal .child-row select,
 .modal .tv-row select, .modal .tv-row input {
   width: 100%; background: var(--input-bg); color: var(--ink); border: 1px solid var(--line);
   border-radius: 6px; padding: 6px 8px; font-size: 13px;
 }
+.modal .edit-field textarea { display: block; resize: vertical; line-height: 1.4; }
 .grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; align-items: end; }
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; align-items: end; }
 .hint-cell { font-size: 11px; color: var(--muted); padding-bottom: 7px; line-height: 1.3; }
@@ -343,3 +344,12 @@ label.field span { display: block; margin-bottom: 3px; }
   font-size: 12px; padding: 4px 6px;
 }
 .pw-toggle:hover { color: var(--accent); }
+
+/* Report-a-bug button pinned to the bottom of the controls panel */
+.report-bug-row { margin-top: 10px; display: flex; justify-content: center; }
+.report-bug {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 5px 16px; color: var(--muted);
+}
+.report-bug svg { width: 14px; height: 14px; }
+.report-bug:hover { color: var(--accent); }

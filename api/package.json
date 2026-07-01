@@ -8,6 +8,8 @@
     "deploy": "wrangler deploy",
     "db:migrate": "wrangler d1 migrations apply calendizer --local",
     "db:migrate:remote": "wrangler d1 migrations apply calendizer --remote",
+    "bugs": "node scripts/triage.mjs",
+    "bugs:remote": "node scripts/triage.mjs --remote",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {

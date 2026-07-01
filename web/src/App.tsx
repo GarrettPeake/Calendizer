@@ -7,6 +7,7 @@ import { Sidebar } from './components/Sidebar';
 import { WeekCalendar } from './components/WeekCalendar';
 import { IntentEditor, blankIntent } from './components/IntentEditor';
 import { ModeEditor } from './components/ModeEditor';
+import { BugReportModal } from './components/BugReportModal';
 import { ThemeToggle, type Theme } from './components/ThemeToggle';
 import { DetectBanner } from './components/DetectBanner';
 import { buildProposal, detectTimezone, type Detected } from './lib/detect';
@@ -39,6 +40,7 @@ export function App() {
   const [viewWeek, setViewWeek] = useState(0);
   const [editing, setEditing] = useState<{ intent: Intent; isNew: boolean } | null>(null);
   const [editingMode, setEditingMode] = useState<{ mode: ModeRecord | null } | null>(null);
+  const [bugOpen, setBugOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [detected, setDetected] = useState<Detected | null>(null);
   const [geoDismissed, setGeoDismissed] = useState<string>(() => localStorage.getItem('calendizer_geo_dismissed') ?? '');
@@ -251,6 +253,7 @@ export function App() {
         onDeleteMode={(id) => guard(api.deleteMode(id).then(reload))}
         feed={feed}
         onRotateFeed={rotateFeed}
+        onReportBug={() => setBugOpen(true)}
         solveMs={solveResp?.solveMs ?? null}
         instanceCount={solveResp?.instances.length ?? 0}
         cached={solveResp?.cached ?? null}
@@ -336,6 +339,28 @@ export function App() {
           horizon={solveResp?.horizon}
           onSave={saveMode}
           onCancel={() => setEditingMode(null)}
+        />
+      ) : null}
+
+      {bugOpen ? (
+        <BugReportModal
+          weekStart={days[0] ?? ''}
+          weekEnd={days[6] ?? ''}
+          onCancel={() => setBugOpen(false)}
+          onSubmit={async (description) => {
+            const schedule = (solveResp?.instances ?? []).filter(
+              (i) => days.length > 0 && i.date >= days[0] && i.date <= days[6]
+            );
+            await api.reportBug({
+              description,
+              clientDatetime: new Date().toISOString(),
+              timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+              config,
+              weekStart: days[0] ?? '',
+              weekEnd: days[6] ?? '',
+              schedule,
+            });
+          }}
         />
       ) : null}
     </div>
