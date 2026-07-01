@@ -121,6 +121,9 @@ label.field span { display: block; margin-bottom: 3px; }
 .btn { background: var(--accent); color: #fff; border: none; border-radius: 6px; padding: 7px 10px; font-size: 13px; cursor: pointer; }
 .btn:hover { filter: brightness(1.08); }
 .btn:disabled { opacity: 0.55; cursor: default; filter: none; }
+.btn-busy { display: inline-flex; align-items: center; gap: 6px; }
+.spin { animation: spin 0.7s linear infinite; opacity: 0.9; }
+@keyframes spin { to { transform: rotate(360deg); } }
 .btn.ghost { background: var(--ghost-bg); color: var(--ink); }
 .btn.tiny { padding: 3px 7px; font-size: 11px; }
 .btn.danger { background: var(--danger-bg); color: var(--danger-ink); }

@@ -3,6 +3,7 @@ import type { GlobalConfig, Intent, TimeValue, Marker, DaysSpec } from 'calendiz
 import { validateIntent } from 'calendizer';
 import type { ModeRecord } from '../api';
 import { FieldMsgs, NumInput } from './formkit';
+import { Spinner } from './icons';
 
 const MARKERS: Marker[] = ['wakeup', 'sleep', 'dawn', 'dusk', 'sunrise', 'sunset'];
 const WEEKDAYS = ['MO', 'TU', 'WE', 'TH', 'FR', 'SA', 'SU'];
@@ -30,11 +31,22 @@ export function IntentEditor(props: {
   modes: ModeRecord[];
   config?: GlobalConfig | null;
   horizon?: { start: string; end: string };
-  onSave: (intent: Intent) => void;
+  onSave: (intent: Intent) => void | Promise<void>;
   onCancel: () => void;
   onSmartEdit: (intent: Intent, instruction: string) => Promise<{ intent: Intent; updates: string; issues: string[] }>;
 }) {
   const [d, setD] = useState<Intent>(() => structuredClone(props.initial));
+  const [saving, setSaving] = useState(false);
+
+  async function save() {
+    if (saving) return;
+    setSaving(true);
+    try {
+      await props.onSave(d); // resolves after the re-solve; the modal usually unmounts
+    } finally {
+      setSaving(false); // reached only if the parent keeps the modal open (e.g. an error)
+    }
+  }
 
   // Natural-language modify: proposes changes that populate the form for review.
   const [instruction, setInstruction] = useState('');
@@ -485,11 +497,20 @@ export function IntentEditor(props: {
 
         <div className="modal-foot">
           {!v.ok ? <span className="foot-note error">{v.errors.length} issue{v.errors.length === 1 ? '' : 's'} to fix</span> : null}
-          <button className="btn ghost" onClick={props.onCancel}>
+          <button className="btn ghost" onClick={props.onCancel} disabled={saving}>
             Cancel
           </button>
-          <button className="btn" onClick={() => props.onSave(d)} disabled={!v.ok}>
-            {props.isNew ? 'Add intent' : 'Save changes'}
+          <button className="btn" onClick={save} disabled={!v.ok || saving}>
+            {saving ? (
+              <span className="btn-busy">
+                <Spinner />
+                {props.isNew ? 'Adding…' : 'Saving…'}
+              </span>
+            ) : props.isNew ? (
+              'Add intent'
+            ) : (
+              'Save changes'
+            )}
           </button>
         </div>
       </div>
