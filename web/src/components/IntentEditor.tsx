@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import type { GlobalConfig, Intent, TimeValue, Marker, DaysSpec } from 'calendizer';
+import { useRef, useState } from 'react';
+import type { GlobalConfig, Intent, TimeValue, Marker, DaysSpec, Window } from 'calendizer';
 import { validateIntent } from 'calendizer';
 import type { ModeRecord } from '../api';
 import { FieldMsgs, NumInput } from './formkit';
@@ -7,6 +7,41 @@ import { Spinner } from './icons';
 
 const MARKERS: Marker[] = ['wakeup', 'sleep', 'dawn', 'dusk', 'sunrise', 'sunset'];
 const WEEKDAYS = ['MO', 'TU', 'WE', 'TH', 'FR', 'SA', 'SU'];
+
+/** One editable per-weekday override row (window.overrides is keyed by weekday). */
+interface OverrideRow {
+  id: number;
+  days: string[];
+  not_before?: TimeValue;
+  not_after?: TimeValue;
+  starts_at?: TimeValue;
+}
+
+/** window.overrides record → editable rows. */
+function overridesToRows(overrides: Window['overrides']): OverrideRow[] {
+  if (!overrides) return [];
+  return Object.entries(overrides).map(([key, partial], i) => {
+    const codes = key.split(',').map((c) => c.trim().toUpperCase());
+    return { id: i, days: WEEKDAYS.filter((w) => codes.includes(w)), ...partial };
+  });
+}
+
+/** Editable rows → window.overrides record. Rows with no days or no set fields are
+ *  dropped (an override with nothing to override isn't one). */
+function rowsToOverrides(rows: OverrideRow[]): Window['overrides'] | undefined {
+  const rec: NonNullable<Window['overrides']> = {};
+  for (const r of rows) {
+    const key = WEEKDAYS.filter((w) => r.days.includes(w)).join(',');
+    if (!key) continue;
+    const partial: Partial<Omit<Window, 'overrides'>> = {};
+    if (r.not_before !== undefined) partial.not_before = r.not_before;
+    if (r.not_after !== undefined) partial.not_after = r.not_after;
+    if (r.starts_at !== undefined) partial.starts_at = r.starts_at;
+    if (Object.keys(partial).length === 0) continue;
+    rec[key] = partial;
+  }
+  return Object.keys(rec).length ? rec : undefined;
+}
 
 /** True when a blocking error targets `field` (exact or nested), for aria-invalid. */
 function hasErr(v: { errors: { field: string }[] }, field: string): boolean {
@@ -38,6 +73,22 @@ export function IntentEditor(props: {
   const [d, setD] = useState<Intent>(() => structuredClone(props.initial));
   const [saving, setSaving] = useState(false);
 
+  // Per-weekday window overrides are edited as an ordered list of rows; the intent's
+  // window.overrides record is derived from them on every change.
+  const [oRows, setORows] = useState<OverrideRow[]>(() => overridesToRows(props.initial.window.overrides));
+  const nextOid = useRef(oRows.length);
+  function commitRows(rows: OverrideRow[]) {
+    setORows(rows);
+    setD((cur) => ({ ...cur, window: { ...cur.window, overrides: rowsToOverrides(rows) } }));
+  }
+  const updateRow = (id: number, p: Partial<OverrideRow>) => commitRows(oRows.map((r) => (r.id === id ? { ...r, ...p } : r)));
+  const removeRow = (id: number) => commitRows(oRows.filter((r) => r.id !== id));
+  const addRow = () => commitRows([...oRows, { id: nextOid.current++, days: [] }]);
+  const toggleRowDay = (row: OverrideRow, w: string) => {
+    const next = row.days.includes(w) ? row.days.filter((x) => x !== w) : [...row.days, w];
+    updateRow(row.id, { days: WEEKDAYS.filter((x) => next.includes(x)) });
+  };
+
   async function save() {
     if (saving) return;
     setSaving(true);
@@ -64,6 +115,9 @@ export function IntentEditor(props: {
     try {
       const res = await props.onSmartEdit(d, instruction.trim());
       setD(res.intent); // populate the form — NOT saved until the user clicks Save
+      const rows = overridesToRows(res.intent.window.overrides);
+      nextOid.current = rows.length;
+      setORows(rows);
       setAiSummary(res.updates);
       setAiIssues(res.issues);
       setInstruction('');
@@ -206,12 +260,45 @@ export function IntentEditor(props: {
               onChange={(tv) => patchWindow({ starts_at: tv })}
             />
             {pinned ? <div className="hint-cell">A fixed start time overrides “can’t start before / end after”.</div> : null}
-            {d.window.overrides ? (
-              <div className="hint-cell">
-                Has per-weekday overrides ({Object.keys(d.window.overrides).join('; ')}) — preserved
-              </div>
-            ) : null}
             <FieldMsgs result={v} field="window" />
+
+            {/* Per-weekday overrides */}
+            <div className="overrides">
+              <div className="overrides-head">
+                <span>Per-weekday overrides</span>
+                <button type="button" className="btn-lite" onClick={addRow}>+ add override</button>
+              </div>
+              {oRows.length === 0 ? (
+                <div className="hint-cell">Optional. Different timing on specific weekdays (e.g. a later start on TU/TH).</div>
+              ) : (
+                oRows.map((row) => {
+                  const rowPinned = row.starts_at != null && !(typeof row.starts_at === 'string' && row.starts_at === '');
+                  return (
+                    <div className="override-row" key={row.id}>
+                      <div className="override-row-head">
+                        <div className="toggle-row">
+                          {WEEKDAYS.map((w) => (
+                            <button
+                              key={w}
+                              type="button"
+                              className={`toggle${row.days.includes(w) ? ' on' : ''}`}
+                              onClick={() => toggleRowDay(row, w)}
+                            >
+                              {w}
+                            </button>
+                          ))}
+                        </div>
+                        <button className="x small" onClick={() => removeRow(row.id)} title="Remove override">×</button>
+                      </div>
+                      <TimeValueField label="Can't start before" value={row.not_before} disabled={rowPinned} onChange={(tv) => updateRow(row.id, { not_before: tv })} />
+                      <TimeValueField label="Can't end after" value={row.not_after} disabled={rowPinned} onChange={(tv) => updateRow(row.id, { not_after: tv })} />
+                      <TimeValueField label="Starts exactly at (pin)" value={row.starts_at} onChange={(tv) => updateRow(row.id, { starts_at: tv })} />
+                    </div>
+                  );
+                })
+              )}
+              <FieldMsgs result={v} field="window.overrides" />
+            </div>
           </Group>
 
           {/* Cardinality */}

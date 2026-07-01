@@ -60,6 +60,13 @@ test('window: inverted clock bounds block; bad clock blocks; marker+clock does n
   assert.ok(!hasWarn(r, 'duration'));
 });
 
+test('window overrides: valid passes; bad clock, bad weekday key, and inverted bounds block', () => {
+  assert.ok(validateIntent(baseIntent({ window: { not_before: '17:00', overrides: { 'TU,TH': { not_after: '21:00' } } } })).ok);
+  assert.ok(hasErr(validateIntent(baseIntent({ window: { overrides: { TU: { not_before: '9am' } } } })), 'window.overrides'));
+  assert.ok(hasErr(validateIntent(baseIntent({ window: { overrides: { XX: { not_after: '21:00' } } } })), 'window.overrides'));
+  assert.ok(hasErr(validateIntent(baseIntent({ window: { overrides: { MO: { not_before: '20:00', not_after: '10:00' } } } })), 'window.overrides'));
+});
+
 test('interval below 1 blocks', () => {
   assert.ok(hasErr(validateIntent(baseIntent({ cardinality: { period: { unit: 'week', interval: 0 }, days: { count: [1, 1] } } })), 'period'));
 });

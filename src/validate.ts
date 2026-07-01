@@ -133,6 +133,33 @@ export function validateIntent(intent: Intent, ctx: IntentValidationContext = {}
   if (nb != null && na != null && nb > na) {
     b.err('window.not_after', "'Can't start before' must be earlier than 'Can't end after'.");
   }
+
+  // Per-weekday overrides: a valid weekday key plus the same per-field rules.
+  const WEEKDAY_CODES = new Set(['MO', 'TU', 'WE', 'TH', 'FR', 'SA', 'SU']);
+  for (const [key, partial] of Object.entries(win.overrides ?? {})) {
+    const codes = key.split(',').map((c) => c.trim().toUpperCase()).filter(Boolean);
+    const label = codes.join(',') || '(no days)';
+    if (codes.length === 0 || codes.some((c) => !WEEKDAY_CODES.has(c))) {
+      b.err('window.overrides', `Override "${key}" must target valid weekdays (MO, TU, WE, TH, FR, SA, SU).`);
+    }
+    for (const [k, fieldLabel] of [
+      ['not_before', "'Can't start before'"],
+      ['not_after', "'Can't end after'"],
+      ['starts_at', "'Starts exactly at'"],
+    ] as const) {
+      const tv = partial[k];
+      if (typeof tv === 'string' && !isValidClock(tv)) {
+        b.err('window.overrides', `Override for ${label}: ${fieldLabel} must be a time like HH:MM.`);
+      } else if (isMarker(tv) && !isInt((tv as { offset_min?: number }).offset_min ?? 0)) {
+        b.err('window.overrides', `Override for ${label}: ${fieldLabel} offset must be a whole number of minutes.`);
+      }
+    }
+    const onb = clockMinutes(partial.not_before);
+    const ona = clockMinutes(partial.not_after);
+    if (onb != null && ona != null && onb > ona) {
+      b.err('window.overrides', `Override for ${label}: 'Can't start before' must be earlier than 'Can't end after'.`);
+    }
+  }
   // Min duration can't fit a clock-bounded window. (Marker-relative bounds resolve
   // per-date, so we only flag the case where both bounds are concrete clock times;
   // a marker window that truly can't fit surfaces as a solver conflict instead.)

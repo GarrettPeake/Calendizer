@@ -315,6 +315,14 @@ label.field span { display: block; margin-bottom: 3px; }
 .tv-suffix { flex: 0 0 auto; font-size: 10px; color: var(--muted); }
 
 .child-row { display: grid; grid-template-columns: 1fr 110px 80px auto; gap: 8px; align-items: center; margin: 6px 0; }
+
+/* Per-weekday window overrides */
+.overrides { margin-top: 4px; }
+.overrides-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+.overrides-head > span { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+.override-row { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; margin: 6px 0; background: var(--surface-2); }
+.override-row-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.override-row-head .toggle-row { flex: 1; }
 .btn-lite {
   background: var(--ghost-bg); border: 1px solid var(--line); border-radius: 6px;
   padding: 5px 10px; font-size: 12px; cursor: pointer; color: var(--ink); margin-top: 4px;
