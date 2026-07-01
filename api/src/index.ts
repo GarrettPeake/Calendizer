@@ -338,13 +338,9 @@ app.get('/feed/:file', async (c) => {
     'Cache-Control': 'public, max-age=300',
     Vary: 'Accept-Encoding',
   };
-  // The feed is large (~1.5MB of text) but highly compressible (~20x). Cloudflare
-  // doesn't auto-compress a Worker's text/calendar response, so gzip it here when
-  // the client supports it — turning a slow multi-MB pull into a ~60KB one.
-  if (/\bgzip\b/i.test(c.req.header('accept-encoding') ?? '')) {
-    const body = new Response(r.ics).body!.pipeThrough(new CompressionStream('gzip'));
-    return new Response(body, { status: 200, headers: { ...headers, 'Content-Encoding': 'gzip' } });
-  }
+  // Return plain text and let Cloudflare's edge compress it. We used to gzip here,
+  // but the edge now also compresses the response, which double-gzipped the body
+  // (two layers, one Content-Encoding header) and broke calendar-app parsing.
   return new Response(r.ics, { status: 200, headers });
 });
 
