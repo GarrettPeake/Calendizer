@@ -4,8 +4,8 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { Instance, Intent, Mode } from './types';
-import { alignHorizonStart, overlay, isFullyPassed } from './temporal';
+import { ConflictReport, Instance, Intent, Mode } from './types';
+import { alignHorizonStart, overlay, realizedConflicts, isFullyPassed } from './temporal';
 
 const inst = (over: Partial<Instance> = {}): Instance => ({
   uid: 'u',
@@ -72,6 +72,47 @@ test('overlay: output is sorted by start', () => {
     now
   );
   assert.deepEqual(out.map((i) => i.uid), ['b', 'a']);
+});
+
+/* ---------------------------- realizedConflicts ---------------------------- */
+
+const conflict = (over: Partial<ConflictReport> = {}): ConflictReport => ({
+  kind: 'overlap',
+  message: 'x',
+  involved: [],
+  ...over,
+});
+
+test('realizedConflicts: drops a phantom overlap (frozen twin, no real overlap)', () => {
+  // "getting ready" 07:00-08:00 and "workout" 08:00-09:00 only touch — no overlap.
+  const insts = [
+    inst({ uid: 'g', subject: 'getting ready', start: '2026-06-30T07:00', end: '2026-06-30T08:00' }),
+    inst({ uid: 'w', subject: 'workout', start: '2026-06-30T08:00', end: '2026-06-30T09:00' }),
+  ];
+  const c = conflict({ date: '2026-06-30', involved: ['getting ready', 'getting ready', 'workout'] });
+  assert.equal(realizedConflicts([c], insts, '2026-06-30').length, 0);
+});
+
+test('realizedConflicts: drops a self-overlap when only one instance exists', () => {
+  const insts = [inst({ uid: 's', subject: 'Watch sunset', start: '2026-06-30T19:49', end: '2026-06-30T20:29' })];
+  const c = conflict({ date: '2026-06-30', involved: ['Watch sunset', 'Watch sunset'] });
+  assert.equal(realizedConflicts([c], insts, '2026-06-30').length, 0);
+});
+
+test('realizedConflicts: keeps a real overlap between two surviving instances', () => {
+  const insts = [
+    inst({ uid: 'p', subject: 'pottery', date: '2026-10-19', start: '2026-10-19T18:00', end: '2026-10-19T19:00' }),
+    inst({ uid: 's', subject: 'Watch sunset', date: '2026-10-19', start: '2026-10-19T18:30', end: '2026-10-19T19:10' }),
+  ];
+  const c = conflict({ date: '2026-10-19', involved: ['pottery', 'Watch sunset'] });
+  assert.equal(realizedConflicts([c], insts, '2026-06-30').length, 1);
+});
+
+test('realizedConflicts: drops a past-day conflict, keeps non-overlap kinds', () => {
+  const past = conflict({ date: '2026-06-01', involved: ['a', 'b'] });
+  const modeConf = conflict({ kind: 'mode-overlap', date: '2026-08-01', involved: ['m1', 'm2'] });
+  const out = realizedConflicts([past, modeConf], [], '2026-06-30');
+  assert.deepEqual(out.map((c) => c.kind), ['mode-overlap']);
 });
 
 /* ------------------------------- isFullyPassed ------------------------------ */

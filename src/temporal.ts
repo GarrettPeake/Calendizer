@@ -7,7 +7,7 @@
  * period-aligned buckets so cardinality spreads naturally, then overlay the
  * immutable frozen past over the projected past (see `overlay`).
  */
-import { Instance, Intent, Mode } from './types';
+import { ConflictReport, Instance, Intent, Mode } from './types';
 import { ISODate, dateRange, startOfISOWeek, startOfMonth } from './time';
 import { expandIntent } from './expand';
 
@@ -40,6 +40,46 @@ export function overlay(frozen: Instance[], projected: Instance[], nowDT: string
   }
   out.sort((a, b) => (a.start < b.start ? -1 : a.start > b.start ? 1 : a.subject.localeCompare(b.subject)));
   return out;
+}
+
+/**
+ * Keep only conflicts actually realized by the final (overlaid) instance set.
+ *
+ * The solver reports conflicts over its full period-aligned projection, but the
+ * overlay drops projected occurrences before `now` (frozen wins). A dropped
+ * occurrence can collide with its own frozen twin — which the solver seeds as an
+ * immovable obstacle — producing a *phantom* overlap conflict ("X overlaps X")
+ * for an event that isn't shown. This drops those, and any conflict on a past
+ * day, while keeping real overlaps between two surviving instances.
+ */
+export function realizedConflicts(
+  conflicts: ConflictReport[],
+  instances: Instance[],
+  today: ISODate
+): ConflictReport[] {
+  const byDate = new Map<ISODate, Instance[]>();
+  for (const i of instances) {
+    const arr = byDate.get(i.date) ?? [];
+    arr.push(i);
+    byDate.set(i.date, arr);
+  }
+
+  return conflicts.filter((c) => {
+    if (c.date && c.date < today) return false; // a past-day conflict is moot
+    if (c.kind !== 'overlap') return true; // non-overlap kinds pass through
+    if (!c.date) return true;
+    const list = byDate.get(c.date) ?? [];
+    const inv = new Set(c.involved);
+    // Realized only if two surviving instances named by the conflict truly overlap.
+    for (let a = 0; a < list.length; a++) {
+      for (let b = a + 1; b < list.length; b++) {
+        const x = list[a];
+        const y = list[b];
+        if (x.start < y.end && y.start < x.end && inv.has(x.subject) && inv.has(y.subject)) return true;
+      }
+    }
+    return false;
+  });
 }
 
 /**

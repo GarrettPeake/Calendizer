@@ -11,7 +11,7 @@
  * This keeps every client — the web UI and the ICS feed — thin and identical, and
  * makes the past stable across edits and the passage of time.
  */
-import { solve, renderICS, alignHorizonStart, overlay, isFullyPassed } from '../../src/index';
+import { solve, renderICS, alignHorizonStart, overlay, realizedConflicts, isFullyPassed } from '../../src/index';
 import { addDays, localNow, startOfISOWeek } from '../../src/time';
 import type { Instance, ConflictReport, CalendarEvent } from '../../src/index';
 import {
@@ -137,6 +137,9 @@ export async function getSolved(db: D1Database, userId: string): Promise<SolvedR
 
   // --- Overlay: immutable frozen past + projected future (past projections drop).
   const instances = overlay(frozen, out.instances, nowDT);
+  // Drop conflicts that no longer correspond to a real overlap in the overlaid
+  // output (e.g. a dropped past projection colliding with its own frozen twin).
+  const conflicts = realizedConflicts(out.conflicts, instances, today);
   const ics = renderICS(instances);
   const computedAt = new Date().toISOString();
 
@@ -146,7 +149,7 @@ export async function getSolved(db: D1Database, userId: string): Promise<SolvedR
   await setCache(db, {
     user_id: userId,
     instances_json: JSON.stringify(instances),
-    conflicts_json: JSON.stringify(out.conflicts),
+    conflicts_json: JSON.stringify(conflicts),
     ics,
     horizon_start: returnedStart,
     horizon_end: end,
@@ -159,7 +162,7 @@ export async function getSolved(db: D1Database, userId: string): Promise<SolvedR
 
   return {
     instances,
-    conflicts: out.conflicts,
+    conflicts,
     ics,
     horizon: { start: returnedStart, end },
     solveMs,
