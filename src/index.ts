@@ -7,7 +7,8 @@
  * and is deterministic — same inputs always yield the same output.
  */
 export * from './types';
-export { solve } from './solver';
+export { solve, greedySolver } from './solver';
+export type { Solver } from './solver';
 export { renderICS } from './ics';
 export { resolveTimeValue, resolveWindow } from './markers';
 export { solarTimes } from './solar';

@@ -64,6 +64,16 @@ interface Placement {
   endPinned: boolean;
 }
 
+/**
+ * A pluggable placement engine. Everything downstream (API feed, web preview)
+ * depends only on this shape, so alternative solvers can be swapped in and A/B'd
+ * against the same Cucumber conformance suite. `greedySolver` (below) is today's
+ * deterministic greedy-seed + local-repair implementation.
+ */
+export interface Solver {
+  solve(input: SolveInput): SolveOutput;
+}
+
 export function solve(input: SolveInput): SolveOutput {
   const { config, intents } = input;
   const modes = input.modes ?? [];
@@ -105,25 +115,42 @@ export function solve(input: SolveInput): SolveOutput {
     pinned: boolean;
     /** True when the pin is an ends_at (end fixed, start = end − duration). */
     endPinned: boolean;
-    rank: number; // index in `ordered` (encodes priority/subject/id)
+    /**
+     * Per-occurrence window slack = resolved window width / duration floor. A
+     * small value means the occurrence has few places it can legally sit (a
+     * narrow window, a big block), so it is the most-constrained and should be
+     * placed FIRST so looser, wider-window neighbours route around it rather than
+     * squatting the one slot it needs. Pinned occurrences are maximally
+     * constrained (a single legal position) → 0.
+     */
+    slack: number;
   }
   const items: Item[] = [];
-  ordered.forEach((intent, rank) => {
+  ordered.forEach((intent) => {
     for (const slot of expandIntent(intent, horizonDates, modes, config.fillToMax)) {
       const rw = resolveWindow(intent.window, slot.date, config);
       const pinned = rw.startsAt !== null || rw.endsAt !== null;
       const endPinned = rw.startsAt === null && rw.endsAt !== null; // starts_at wins if both
-      items.push({ intent, slot, pinned, endPinned, rank });
+      const floor = Math.max(1, intent.duration[0]);
+      const slack = pinned ? 0 : Math.max(0, rw.notAfter - rw.notBefore) / floor;
+      items.push({ intent, slot, pinned, endPinned, slack });
     }
   });
   // Placement tiers: pinned (hard) first, then guaranteed (floor), then optional
   // aspiration occurrences last — so extras only claim slots nothing else needs.
+  // Within a tier: priority desc, then most-constrained (least slack) first, then
+  // subject/id/date for determinism.
   const tierOf = (it: Item) => (it.pinned ? 0 : it.slot.optional ? 2 : 1);
   items.sort((a, b) => {
     const ta = tierOf(a);
     const tb = tierOf(b);
     if (ta !== tb) return ta - tb;
-    if (a.rank !== b.rank) return a.rank - b.rank; // then priority/subject/id
+    if (b.intent.priority !== a.intent.priority) return b.intent.priority - a.intent.priority;
+    if (a.slack !== b.slack) return a.slack - b.slack; // most-constrained first
+    if (a.intent.subject !== b.intent.subject) return a.intent.subject.localeCompare(b.intent.subject);
+    const aid = a.intent.id ?? '';
+    const bid = b.intent.id ?? '';
+    if (aid !== bid) return aid.localeCompare(bid);
     if (a.slot.date !== b.slot.date) return a.slot.date < b.slot.date ? -1 : 1;
     return a.slot.perDayIndex - b.slot.perDayIndex;
   });
@@ -180,6 +207,9 @@ export function solve(input: SolveInput): SolveOutput {
 
   return { instances, updates, conflicts };
 }
+
+/** The default engine: deterministic greedy seed + local repair. */
+export const greedySolver: Solver = { solve };
 
 /** Occupied interval for a placement, in absolute minutes. */
 function occFor(p: Placement, origin: ISODate): Occupied {
@@ -484,9 +514,17 @@ function distributeDurations(placements: Placement[], fixed: Occupied[], config:
       const floors = group.reduce((acc, p) => acc + p.intent.duration[0], 0);
       if (floors >= capacity) continue; // no slack — leave floors as placed
 
-      // Allocate slack to higher priority first (then subject), up to each max.
+      // Pack (and hand slack to) the group in the same order the greedy pass used:
+      // priority desc, then most-constrained (least window slack) first, so a
+      // narrow-window occupant claims its slot before a wide-window neighbour that
+      // could sit anywhere — then subject for determinism.
+      const slackOf = (p: Placement) =>
+        Math.max(0, win.get(p)!.na - win.get(p)!.nb) / Math.max(1, p.intent.duration[0]);
       const order = [...group].sort(
-        (a, b) => b.intent.priority - a.intent.priority || a.intent.subject.localeCompare(b.intent.subject)
+        (a, b) =>
+          b.intent.priority - a.intent.priority ||
+          slackOf(a) - slackOf(b) ||
+          a.intent.subject.localeCompare(b.intent.subject)
       );
       let slack = capacity - floors;
       const dur = new Map<Placement, number>();
