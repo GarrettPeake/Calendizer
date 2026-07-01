@@ -134,6 +134,54 @@ Feature: Filling flexible counts toward their max (fillToMax)
     And no two occurrences overlap
     And there are no conflicts
 
+  Scenario: A lone flexible-duration task grows to its max within its window
+    Given fill toward max is enabled
+    When I add the intent:
+      """
+      {
+        "subject": "pottery", "mode": "default", "priority": 50,
+        "duration": [60, 120],
+        "window": { "not_before": "17:00", "not_after": "19:00" },
+        "cardinality": { "days": { "dates": ["2026-07-07"] } }
+      }
+      """
+    And I solve
+    Then the occurrence of "pottery" on "2026-07-07" runs from "17:00" to "19:00"
+    And every occurrence of "pottery" lasts 120 minutes
+    And there are no conflicts
+
+  Scenario: A lone flexible task grows only up to the next obstacle
+    Given fill toward max is enabled
+    And an existing fixed event "call" on "2026-07-07" from "18:00" to "19:00"
+    When I add the intent:
+      """
+      {
+        "subject": "workout", "mode": "default", "priority": 50,
+        "duration": [30, 90],
+        "window": { "not_before": "17:00", "not_after": "20:00" },
+        "cardinality": { "days": { "dates": ["2026-07-07"] } }
+      }
+      """
+    And I solve
+    Then the occurrence of "workout" on "2026-07-07" runs from "17:00" to "18:00"
+    And no occurrence overlaps the fixed event "call"
+    And there are no conflicts
+
+  Scenario: With fill toward max OFF a lone flexible task stays at its floor
+    When I add the intent:
+      """
+      {
+        "subject": "pottery", "mode": "default", "priority": 50,
+        "duration": [60, 120],
+        "window": { "not_before": "17:00", "not_after": "19:00" },
+        "cardinality": { "days": { "dates": ["2026-07-07"] } }
+      }
+      """
+    And I solve
+    Then the occurrence of "pottery" on "2026-07-07" runs from "17:00" to "18:00"
+    And every occurrence of "pottery" lasts 60 minutes
+    And there are no conflicts
+
   Scenario: Extras fill each week across a multi-week horizon
     Given the planning horizon is "2026-07-06" to "2026-07-19"
     And fill toward max is enabled

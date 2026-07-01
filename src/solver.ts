@@ -382,7 +382,8 @@ function loadOn(occupied: Occupied[], origin: ISODate, date: ISODate): number {
  * contend for the same window on a day, give each its floor then hand the
  * leftover free time to the higher-priority ones (up to their max) — so a busy
  * hour is filled rather than left partly idle — and re-pack them back-to-back
- * into the window's free gaps. Lone flexible events are left at their floor.
+ * into the window's free gaps. A lone flexible occurrence grows in place to fill
+ * the free room after it (see `growInPlace`).
  */
 function distributeDurations(placements: Placement[], fixed: Occupied[], config: GlobalConfig, origin: ISODate): void {
   const grid = Math.max(1, config.grid);
@@ -396,7 +397,6 @@ function distributeDurations(placements: Placement[], fixed: Occupied[], config:
   }
 
   for (const [date, flex] of byDay) {
-    if (flex.length < 2) continue;
     const win = new Map<Placement, { nb: number; na: number }>();
     for (const p of flex) {
       const w = resolveWindow(p.intent.window, date, config);
@@ -421,7 +421,10 @@ function distributeDurations(placements: Placement[], fixed: Occupied[], config:
     if (cur.length) groups.push(cur);
 
     for (const group of groups) {
-      if (group.length < 2) continue;
+      if (group.length === 1) {
+        growInPlace(group[0], date, placements, fixed, config, origin);
+        continue;
+      }
       const ws = Math.min(...group.map((p) => win.get(p)!.nb));
       const we = Math.max(...group.map((p) => win.get(p)!.na));
 
@@ -480,6 +483,50 @@ function distributeDurations(placements: Placement[], fixed: Occupied[], config:
         }
       }
     }
+  }
+}
+
+/**
+ * Grow a lone flexible occurrence's duration in place (start fixed) to fill the
+ * free room after it — up to its max — bounded by its window end, the next
+ * obstacle (fixed event or other placement, minus padding), and the evening
+ * sleep blackout. Never shrinks and can't create an overlap.
+ */
+function growInPlace(
+  p: Placement,
+  date: ISODate,
+  placements: Placement[],
+  fixed: Occupied[],
+  config: GlobalConfig,
+  origin: ISODate
+): void {
+  const grid = Math.max(1, config.grid);
+  const padding = config.padding ?? 0;
+  const start = p.startMin;
+  const w = resolveWindow(p.intent.window, date, config);
+  const dayBase = absoluteMinutes(origin, date, 0);
+
+  let limit = w.notAfter; // must end by the window's not_after
+  const consider = (obstacleStart: number) => {
+    if (obstacleStart > start) limit = Math.min(limit, obstacleStart - padding);
+  };
+  for (const o of fixed) {
+    if (o.endAbs > dayBase && o.startAbs < dayBase + 1440) consider(o.startAbs - dayBase);
+  }
+  for (const q of placements) {
+    if (q === p || q.date !== date) continue;
+    consider(q.startMin);
+  }
+  // Don't grow into the evening blackout unless the event already starts there.
+  const { sleepStart } = resolveSleepBlackout(date, config);
+  if (start < sleepStart) limit = Math.min(limit, sleepStart);
+
+  const maxEnd = Math.min(start + p.intent.duration[1], limit);
+  const newEnd = Math.floor(maxEnd / grid) * grid; // keep the end grid-aligned
+  const newDur = newEnd - start;
+  if (newDur > p.durationMin) {
+    p.durationMin = newDur;
+    p.placedDuringSleep = isInSleep(start, newDur, date, config);
   }
 }
 
