@@ -1,5 +1,7 @@
 import type { GlobalConfig, Intent } from 'calendizer';
+import { validateConfig } from 'calendizer';
 import type { FeedInfo, ModeRecord, User } from '../api';
+import { FieldMsgs } from './formkit';
 import { colorFor, modeColor } from '../lib/colors';
 import { rangeLabel } from '../lib/dates';
 import { slug, summarize } from '../lib/intentMeta';
@@ -140,6 +142,7 @@ export function Sidebar(p: Props) {
 
 function ConfigCard({ config, onChange }: { config: GlobalConfig; onChange: (c: GlobalConfig) => void }) {
   const set = (patch: Partial<GlobalConfig>) => onChange({ ...config, ...patch });
+  const v = validateConfig(config);
   return (
     <div className="section">
       <SectionHeader
@@ -149,17 +152,17 @@ function ConfigCard({ config, onChange }: { config: GlobalConfig; onChange: (c: 
       />
       <div className="card">
         <div className="row">
-          <Text label="Wakeup time" value={String(config.wakeup)} onChange={(v) => set({ wakeup: v })} hint="Your wake time (HH:MM). Useful to schedule intents for 'wakeup' or 'wakeup + 15m'" />
-          <Text label="Bedtime" value={String(config.sleep)} onChange={(v) => set({ sleep: v })} hint="Your bedtime (HH:MM). Useful to schedule intents for 'bedtime - 30m'" />
+          <Time label="Wakeup time" value={String(config.wakeup)} onChange={(t) => set({ wakeup: t })} hint="Your wake time. Useful to schedule intents for 'wakeup' or 'wakeup + 15m'" />
+          <Time label="Bedtime" value={String(config.sleep)} onChange={(t) => set({ sleep: t })} hint="Your bedtime. Useful to schedule intents for 'bedtime - 30m'" />
         </div>
+        <FieldMsgs result={v} field="wakeup" />
+        <FieldMsgs result={v} field="sleep" />
         <div className="row">
-          <Num label="Time grid (min)" value={config.grid} onChange={(v) => set({ grid: v })} hint="Events snap to this many minutes (i.e. no 3:57 starts)" />
-          <Num label="Padding (min)" value={config.padding} onChange={(v) => set({ padding: v })} hint="Minimum buffer enforced between events" />
+          <Num label="Time grid (min)" min={1} step={1} value={config.grid} onChange={(n) => set({ grid: n })} hint="Events snap to this many minutes (i.e. no 3:57 starts)" />
+          <Num label="Padding (min)" min={0} step={5} value={config.padding} onChange={(n) => set({ padding: n })} hint="Minimum buffer enforced between events" />
         </div>
-        <div className="row">
-          <Num label="Min break" value={config.min_break} onChange={(v) => set({ min_break: v })} hint={'Shortest gap that counts as a real "break," anything smaller is avoided so the calendar flows smoothly'} />
-          <Num label="Max block" value={config.max_block} onChange={(v) => set({ max_block: v })} hint="Longest continuous run of events before a break is wanted" />
-        </div>
+        <FieldMsgs result={v} field="grid" />
+        <FieldMsgs result={v} field="padding" />
         <label
           className="field"
           title="Sets your rough location which allows scheduling things for sunrise/sunset. Also needed to compute your timezone offset. Auto-detected from your IP; change it here to override"
@@ -194,19 +197,25 @@ function ConfigCard({ config, onChange }: { config: GlobalConfig; onChange: (c: 
   );
 }
 
-function Text(props: { label: string; value: string; onChange: (v: string) => void; hint?: string }) {
+function Time(props: { label: string; value: string; onChange: (v: string) => void; hint?: string }) {
   return (
     <label className="field" title={props.hint}>
       <span>{props.label}</span>
-      <input type="text" value={props.value} onChange={(e) => props.onChange(e.target.value)} />
+      <input type="time" value={props.value} step={60} onChange={(e) => props.onChange(e.target.value)} />
     </label>
   );
 }
-function Num(props: { label: string; value: number; onChange: (v: number) => void; hint?: string }) {
+function Num(props: { label: string; value: number; onChange: (v: number) => void; hint?: string; min?: number; step?: number }) {
   return (
     <label className="field" title={props.hint}>
       <span>{props.label}</span>
-      <input type="number" value={props.value} onChange={(e) => props.onChange(Number(e.target.value))} />
+      <input
+        type="number"
+        min={props.min}
+        step={props.step}
+        value={Number.isFinite(props.value) ? props.value : ''}
+        onChange={(e) => props.onChange(e.target.value === '' ? NaN : Math.trunc(Number(e.target.value)))}
+      />
     </label>
   );
 }

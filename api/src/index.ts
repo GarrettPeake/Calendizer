@@ -1,7 +1,8 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import type { Env, Vars } from './env';
-import type { GlobalConfig, Intent, Mode } from '../../src/index';
+import type { GlobalConfig, Intent, Mode, ValidationResult } from '../../src/index';
+import { validateIntent, validateMode, validateConfig, validateCredentials } from '../../src/index';
 import { hashPassword, verifyPassword, signToken, verifyToken } from './auth';
 import * as repo from './repo';
 import { getSolved } from './solveService';
@@ -33,6 +34,10 @@ function publicUser(u: repo.UserRow) {
 async function invalidate(c: any) {
   await repo.invalidateCache(c.env.DB, c.get('userId'));
 }
+/** First blocking error message, or null. Server rejects on errors; warnings pass. */
+function firstError(r: ValidationResult): string | null {
+  return r.errors.length ? r.errors[0].message : null;
+}
 
 /* --------------------------------- auth --------------------------------- */
 
@@ -45,8 +50,10 @@ app.post('/api/auth/register', async (c) => {
   const username = (body.username || '').trim();
   const password = body.password || '';
   if (body.invite !== c.env.INVITE_CODE) return c.json({ error: 'Invalid invite code' }, 403);
-  if (username.length < 3 || password.length < 8)
-    return c.json({ error: 'Username must be ≥3 chars and password ≥8 chars' }, 400);
+  // Mirror the client's username/password rules (invite handled above).
+  const cred = validateCredentials('register', { username, password });
+  const credErr = cred.errors.find((e) => e.field === 'username' || e.field === 'password');
+  if (credErr) return c.json({ error: credErr.message }, 400);
 
   if (await repo.getUserByUsername(c.env.DB, username)) return c.json({ error: 'Username taken' }, 409);
 
@@ -79,6 +86,8 @@ app.get('/api/config', requireAuth, async (c) => c.json(await repo.getConfig(c.e
 
 app.put('/api/config', requireAuth, async (c) => {
   const cfg = await c.req.json<GlobalConfig>();
+  const err = firstError(validateConfig(cfg));
+  if (err) return c.json({ error: err }, 400);
   await repo.setConfig(c.env.DB, c.get('userId'), cfg);
   await invalidate(c);
   return c.json(cfg);
@@ -90,7 +99,11 @@ app.get('/api/intents', requireAuth, async (c) => c.json(await repo.listIntents(
 
 app.post('/api/intents', requireAuth, async (c) => {
   const intent = await c.req.json<Intent>();
-  const created = await repo.createIntent(c.env.DB, c.get('userId'), intent);
+  const userId = c.get('userId');
+  const [config, modes] = await Promise.all([repo.getConfig(c.env.DB, userId), repo.listModes(c.env.DB, userId)]);
+  const err = firstError(validateIntent(intent, { config, modes }));
+  if (err) return c.json({ error: err }, 400);
+  const created = await repo.createIntent(c.env.DB, userId, intent);
   await invalidate(c);
   return c.json(created, 201);
 });
@@ -102,7 +115,11 @@ app.get('/api/intents/:id', requireAuth, async (c) => {
 
 app.put('/api/intents/:id', requireAuth, async (c) => {
   const intent = await c.req.json<Intent>();
-  const updated = await repo.updateIntent(c.env.DB, c.get('userId'), c.req.param('id'), intent);
+  const userId = c.get('userId');
+  const [config, modes] = await Promise.all([repo.getConfig(c.env.DB, userId), repo.listModes(c.env.DB, userId)]);
+  const err = firstError(validateIntent(intent, { config, modes }));
+  if (err) return c.json({ error: err }, 400);
+  const updated = await repo.updateIntent(c.env.DB, userId, c.req.param('id'), intent);
   if (!updated) return c.json({ error: 'Not found' }, 404);
   await invalidate(c);
   return c.json(updated);
@@ -121,14 +138,23 @@ app.get('/api/modes', requireAuth, async (c) => c.json(await repo.listModes(c.en
 
 app.post('/api/modes', requireAuth, async (c) => {
   const mode = await c.req.json<Mode>();
-  const created = await repo.createMode(c.env.DB, c.get('userId'), mode);
+  const userId = c.get('userId');
+  const others = await repo.listModes(c.env.DB, userId);
+  const err = firstError(validateMode(mode, { others }));
+  if (err) return c.json({ error: err }, 400);
+  const created = await repo.createMode(c.env.DB, userId, mode);
   await invalidate(c);
   return c.json(created, 201);
 });
 
 app.put('/api/modes/:id', requireAuth, async (c) => {
   const mode = await c.req.json<Mode>();
-  const updated = await repo.updateMode(c.env.DB, c.get('userId'), c.req.param('id'), mode);
+  const userId = c.get('userId');
+  const id = c.req.param('id');
+  const others = (await repo.listModes(c.env.DB, userId)).filter((m) => m.id !== id);
+  const err = firstError(validateMode(mode, { others }));
+  if (err) return c.json({ error: err }, 400);
+  const updated = await repo.updateMode(c.env.DB, userId, id, mode);
   if (!updated) return c.json({ error: 'Not found' }, 404);
   await invalidate(c);
   return c.json(updated);
@@ -175,7 +201,11 @@ app.post('/api/smart', requireAuth, async (c) => {
     }
     modeRef = modeRecord ? modeRecord.id : 'default';
   }
-  const intent = await repo.createIntent(c.env.DB, userId, { ...parsed.intent, mode: modeRef });
+  const draft = { ...parsed.intent, mode: modeRef };
+  const allModes = await repo.listModes(c.env.DB, userId);
+  const err = firstError(validateIntent(draft, { config, modes: allModes }));
+  if (err) return c.json({ error: `The AI produced an invalid intent: ${err}`, explanation: parsed.explanation }, 422);
+  const intent = await repo.createIntent(c.env.DB, userId, draft);
   await invalidate(c);
   return c.json({ intent, mode: modeRecord, explanation: parsed.explanation }, 201);
 });

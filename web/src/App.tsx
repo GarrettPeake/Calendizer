@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { GlobalConfig, Intent, Mode } from 'calendizer';
+import { validateConfig } from 'calendizer';
 import { api, getToken, setToken, type FeedInfo, type ModeRecord, type SolveResponse, type User } from './api';
 import { Login } from './Login';
 import { Sidebar } from './components/Sidebar';
@@ -95,6 +96,7 @@ export function App() {
   useEffect(() => {
     if (!config || !configDirty.current) return;
     const t = setTimeout(async () => {
+      if (!validateConfig(config).ok) return; // invalid — hold off until it's fixed
       configDirty.current = false;
       await guard(api.putConfig(config).then(() => api.solve()).then(setSolveResp));
     }, 500);
@@ -313,6 +315,8 @@ export function App() {
           initial={editing.intent}
           isNew={editing.isNew}
           modes={modes}
+          config={config}
+          horizon={solveResp?.horizon}
           onSave={saveEditing}
           onCancel={() => setEditing(null)}
           onSmartEdit={(intent, instruction) => api.smartEdit(intent, instruction)}
@@ -328,6 +332,8 @@ export function App() {
               : { name: '', span: [solveResp?.horizon.start ?? mondayOf(today), addDays(solveResp?.horizon.start ?? mondayOf(today), 6)] }
           }
           isNew={!editingMode.mode}
+          others={modes.filter((m) => m.id !== editingMode.mode?.id)}
+          horizon={solveResp?.horizon}
           onSave={saveMode}
           onCancel={() => setEditingMode(null)}
         />

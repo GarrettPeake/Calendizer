@@ -8,6 +8,7 @@
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "cucumber-js",
+    "test:unit": "node --test --require ts-node/register 'src/**/*.test.ts'",
     "test:seed": "cucumber-js features/seed"
   },
   "license": "MIT",

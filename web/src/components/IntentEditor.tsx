@@ -1,9 +1,16 @@
 import { useState } from 'react';
-import type { Intent, TimeValue, Marker, DaysSpec } from 'calendizer';
+import type { GlobalConfig, Intent, TimeValue, Marker, DaysSpec } from 'calendizer';
+import { validateIntent } from 'calendizer';
 import type { ModeRecord } from '../api';
+import { FieldMsgs, NumInput } from './formkit';
 
 const MARKERS: Marker[] = ['wakeup', 'sleep', 'dawn', 'dusk', 'sunrise', 'sunset'];
 const WEEKDAYS = ['MO', 'TU', 'WE', 'TH', 'FR', 'SA', 'SU'];
+
+/** True when a blocking error targets `field` (exact or nested), for aria-invalid. */
+function hasErr(v: { errors: { field: string }[] }, field: string): boolean {
+  return v.errors.some((e) => e.field === field || e.field.startsWith(field + '.'));
+}
 
 /** A blank intent used by "new intent". */
 export function blankIntent(): Intent {
@@ -21,6 +28,8 @@ export function IntentEditor(props: {
   initial: Intent;
   isNew: boolean;
   modes: ModeRecord[];
+  config?: GlobalConfig | null;
+  horizon?: { start: string; end: string };
   onSave: (intent: Intent) => void;
   onCancel: () => void;
   onSmartEdit: (intent: Intent, instruction: string) => Promise<{ intent: Intent; updates: string; issues: string[] }>;
@@ -75,6 +84,18 @@ export function IntentEditor(props: {
       : props.modes.find((m) => m.id === d.mode)?.id ?? props.modes.find((m) => m.name === d.mode)?.id ?? d.mode;
   const modeKnown = modeValue === 'default' || modeValue === 'all' || props.modes.some((m) => m.id === modeValue);
 
+  // Live validation drives Save gating + inline messages.
+  const v = validateIntent(d, {
+    config: props.config ?? undefined,
+    modes: props.modes,
+    horizon: props.horizon,
+  });
+  // "Max" fields only take effect when the global "Maximize events" is on.
+  const maximizeOff = !props.config?.fillToMax;
+  const maxHint = maximizeOff ? 'Only used when “Maximize events” is on (in Calendar config).' : undefined;
+  // A pinned start overrides the before/after bounds — disable them while pinned.
+  const pinned = d.window.starts_at != null && !(typeof d.window.starts_at === 'string' && d.window.starts_at === '');
+
   return (
     <div className="modal-overlay" onMouseDown={props.onCancel}>
       <div className="modal" onMouseDown={(e) => e.stopPropagation()}>
@@ -119,11 +140,12 @@ export function IntentEditor(props: {
           {/* Basics */}
           <Group title="Basics">
             <Field label="Name">
-              <input type="text" value={d.subject} onChange={(e) => patch({ subject: e.target.value })} />
+              <input type="text" value={d.subject} onChange={(e) => patch({ subject: e.target.value })} aria-invalid={hasErr(v, 'subject')} />
             </Field>
+            <FieldMsgs result={v} field="subject" />
             <div className="grid2">
               <Field label="Mode">
-                <select value={modeValue} onChange={(e) => patch({ mode: e.target.value })}>
+                <select value={modeValue} onChange={(e) => patch({ mode: e.target.value })} aria-invalid={hasErr(v, 'mode')}>
                   <option value="default">normal</option>
                   <option value="all">all (happens in every mode)</option>
                   {props.modes.map((m) => (
@@ -135,25 +157,21 @@ export function IntentEditor(props: {
                 </select>
               </Field>
               <Field label="Priority">
-                <input type="number" value={d.priority} onChange={(e) => patch({ priority: Number(e.target.value) })} />
+                <NumInput value={d.priority} min={0} max={100} onChange={(n) => patch({ priority: n })} />
               </Field>
             </div>
+            <FieldMsgs result={v} field="mode" />
+            <FieldMsgs result={v} field="priority" />
             <div className="grid2">
               <Field label="Min duration (m)">
-                <input
-                  type="number"
-                  value={d.duration[0]}
-                  onChange={(e) => patch({ duration: [Number(e.target.value), d.duration[1]] })}
-                />
+                <NumInput value={d.duration[0]} min={0} onChange={(n) => patch({ duration: [n, d.duration[1]] })} />
               </Field>
               <Field label="Max duration (m)">
-                <input
-                  type="number"
-                  value={d.duration[1]}
-                  onChange={(e) => patch({ duration: [d.duration[0], Number(e.target.value)] })}
-                />
+                <NumInput value={d.duration[1]} min={0} onChange={(n) => patch({ duration: [d.duration[0], n] })} />
               </Field>
             </div>
+            {maxHint ? <div className="hint-cell">Max duration: {maxHint}</div> : null}
+            <FieldMsgs result={v} field="duration" />
           </Group>
 
           {/* Window */}
@@ -161,23 +179,27 @@ export function IntentEditor(props: {
             <TimeValueField
               label="Can't start before"
               value={d.window.not_before}
-              onChange={(v) => patchWindow({ not_before: v })}
+              disabled={pinned}
+              onChange={(tv) => patchWindow({ not_before: tv })}
             />
             <TimeValueField
               label="Can't end after"
               value={d.window.not_after}
-              onChange={(v) => patchWindow({ not_after: v })}
+              disabled={pinned}
+              onChange={(tv) => patchWindow({ not_after: tv })}
             />
             <TimeValueField
               label="Starts exactly at (pin)"
               value={d.window.starts_at}
-              onChange={(v) => patchWindow({ starts_at: v })}
+              onChange={(tv) => patchWindow({ starts_at: tv })}
             />
+            {pinned ? <div className="hint-cell">A fixed start time overrides “can’t start before / end after”.</div> : null}
             {d.window.overrides ? (
               <div className="hint-cell">
                 Has per-weekday overrides ({Object.keys(d.window.overrides).join('; ')}) — preserved
               </div>
             ) : null}
+            <FieldMsgs result={v} field="window" />
           </Group>
 
           {/* Cardinality */}
@@ -190,7 +212,8 @@ export function IntentEditor(props: {
                   onChange={(e) => {
                     const u = e.target.value;
                     if (u === 'none') patchCard({ period: undefined });
-                    else patchCard({ period: { unit: u as any, interval: card.period?.interval ?? 1 } });
+                    // Calendar Mode ignores interval — force it to 1 so it can't affect the solver.
+                    else patchCard({ period: { unit: u as any, interval: u === 'mode' ? 1 : card.period?.interval ?? 1 } });
                   }}
                 >
                   <option value="none">One time</option>
@@ -200,18 +223,17 @@ export function IntentEditor(props: {
                   <option value="mode">Calendar Mode</option>
                 </select>
               </Field>
-              <Field label="">
-                <input
-                  type="number"
-                  min={1}
-                  disabled={!card.period || card.period.unit === 'mode'}
-                  value={card.period?.interval ?? 1}
-                  onChange={(e) =>
-                    card.period && patchCard({ period: { ...card.period, interval: Number(e.target.value) } })
-                  }
-                />
-              </Field>
+              {card.period && card.period.unit !== 'mode' ? (
+                <Field label="">
+                  <NumInput
+                    min={1}
+                    value={card.period.interval ?? 1}
+                    onChange={(n) => card.period && patchCard({ period: { ...card.period, interval: n } })}
+                  />
+                </Field>
+              ) : null}
             </div>
+            <FieldMsgs result={v} field="period" />
 
             {/* Days */}
             <Field label="What days?">
@@ -226,33 +248,32 @@ export function IntentEditor(props: {
                 }}
               >
                 <option value="none">— none —</option>
-                <option value="count">Count, spread across the period</option>
+                <option value="count">{card.period ? 'Count, spread across the period' : 'Count, spread across the horizon'}</option>
                 <option value="weekdays">Specific weekdays</option>
                 <option value="dates">Specific dates</option>
               </select>
             </Field>
 
             {daysKind === 'count' && card.days && 'count' in card.days ? (
-              <div className="grid2">
-                <Field label="Min days">
-                  <input
-                    type="number"
-                    value={card.days.count[0]}
-                    onChange={(e) =>
-                      patchCard({ days: { count: [Number(e.target.value), (card.days as any).count[1]] } })
-                    }
-                  />
-                </Field>
-                <Field label="Max days">
-                  <input
-                    type="number"
-                    value={card.days.count[1]}
-                    onChange={(e) =>
-                      patchCard({ days: { count: [(card.days as any).count[0], Number(e.target.value)] } })
-                    }
-                  />
-                </Field>
-              </div>
+              <>
+                <div className="grid2">
+                  <Field label="Min days">
+                    <NumInput
+                      value={card.days.count[0]}
+                      min={0}
+                      onChange={(n) => patchCard({ days: { count: [n, (card.days as any).count[1]] } })}
+                    />
+                  </Field>
+                  <Field label="Max days">
+                    <NumInput
+                      value={card.days.count[1]}
+                      min={0}
+                      onChange={(n) => patchCard({ days: { count: [(card.days as any).count[0], n] } })}
+                    />
+                  </Field>
+                </div>
+                {maxHint ? <div className="hint-cell">Max days: {maxHint}</div> : null}
+              </>
             ) : null}
 
             {daysKind === 'weekdays' && card.days && 'weekdays' in card.days ? (
@@ -298,6 +319,7 @@ export function IntentEditor(props: {
                 />
               </Field>
             ) : null}
+            <FieldMsgs result={v} field="days" />
 
             {/* per_day */}
             <Field label="">
@@ -311,22 +333,25 @@ export function IntentEditor(props: {
               </label>
             </Field>
             {card.per_day ? (
-              <div className="grid2">
-                <Field label="Min">
-                  <input
-                    type="number"
-                    value={card.per_day.count[0]}
-                    onChange={(e) => patchCard({ per_day: { count: [Number(e.target.value), card.per_day!.count[1]] } })}
-                  />
-                </Field>
-                <Field label="Max">
-                  <input
-                    type="number"
-                    value={card.per_day.count[1]}
-                    onChange={(e) => patchCard({ per_day: { count: [card.per_day!.count[0], Number(e.target.value)] } })}
-                  />
-                </Field>
-              </div>
+              <>
+                <div className="grid2">
+                  <Field label="Min">
+                    <NumInput
+                      value={card.per_day.count[0]}
+                      min={0}
+                      onChange={(n) => patchCard({ per_day: { count: [n, card.per_day!.count[1]] } })}
+                    />
+                  </Field>
+                  <Field label="Max">
+                    <NumInput
+                      value={card.per_day.count[1]}
+                      min={0}
+                      onChange={(n) => patchCard({ per_day: { count: [card.per_day!.count[0], n] } })}
+                    />
+                  </Field>
+                </div>
+                <FieldMsgs result={v} field="per_day" />
+              </>
             ) : null}
 
             {/* total */}
@@ -362,6 +387,7 @@ export function IntentEditor(props: {
                 </Field>
               </div>
             ) : null}
+            <FieldMsgs result={v} field="total" />
           </Group>
 
           {/* Children */}
@@ -451,16 +477,18 @@ export function IntentEditor(props: {
                 >
                   + add child
                 </button>
+                <FieldMsgs result={v} field="children" />
               </>
             ) : null}
           </Group>
         </div>
 
         <div className="modal-foot">
+          {!v.ok ? <span className="foot-note error">{v.errors.length} issue{v.errors.length === 1 ? '' : 's'} to fix</span> : null}
           <button className="btn ghost" onClick={props.onCancel}>
             Cancel
           </button>
-          <button className="btn" onClick={() => props.onSave(d)} disabled={!d.subject.trim()}>
+          <button className="btn" onClick={() => props.onSave(d)} disabled={!v.ok}>
             {props.isNew ? 'Add intent' : 'Save changes'}
           </button>
         </div>
@@ -471,18 +499,19 @@ export function IntentEditor(props: {
 
 /* ---------- sub-controls ---------- */
 
-function TimeValueField(props: { label: string; value: TimeValue | undefined; onChange: (v: TimeValue | undefined) => void }) {
+function TimeValueField(props: { label: string; value: TimeValue | undefined; disabled?: boolean; onChange: (v: TimeValue | undefined) => void }) {
   const v = props.value;
   const kind: 'none' | 'clock' | Marker = v === undefined ? 'none' : typeof v === 'string' ? 'clock' : v.marker;
   const clock = typeof v === 'string' ? v : '09:00';
   const offset = typeof v === 'object' && v ? v.offset_min ?? 0 : 0;
 
   return (
-    <div className="tv-row">
+    <div className="tv-row" style={props.disabled ? { opacity: 0.5 } : undefined}>
       <div className="tv-label">{props.label}</div>
       <div className="tv-controls">
         <select
           value={kind}
+          disabled={props.disabled}
           onChange={(e) => {
             const k = e.target.value;
             if (k === 'none') props.onChange(undefined);
@@ -499,7 +528,7 @@ function TimeValueField(props: { label: string; value: TimeValue | undefined; on
           ))}
         </select>
         {kind === 'clock' ? (
-          <input type="text" value={clock} placeholder="HH:MM" onChange={(e) => props.onChange(e.target.value)} />
+          <input type="text" value={clock} placeholder="HH:MM" disabled={props.disabled} onChange={(e) => props.onChange(e.target.value)} />
         ) : kind !== 'none' ? (
           <>
             <input

@@ -14,3 +14,19 @@ export { solarTimes } from './solar';
 export { expandIntent } from './expand';
 export { tileChildren } from './children';
 export { activeModeOn, isIntentActiveOn, detectModeOverlaps } from './modes';
+export {
+  validateIntent,
+  validateMode,
+  validateConfig,
+  validateCredentials,
+  isValidClock,
+  isValidISODate,
+} from './validate';
+export type {
+  ValidationIssue,
+  ValidationResult,
+  Severity,
+  IntentValidationContext,
+  ModeValidationContext,
+  CredentialInput,
+} from './validate';

@@ -28,6 +28,16 @@ export interface MetricsResponse {
   avgMs: number | null;
 }
 
+/** Error carrying the HTTP status so callers can map codes to friendly messages. */
+export class ApiError extends Error {
+  status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+  }
+}
+
 const TOKEN_KEY = 'calendizer_token';
 
 export function getToken(): string | null {
@@ -53,7 +63,7 @@ async function req<T>(method: string, path: string, body?: unknown): Promise<T> 
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     if (res.status === 401) setToken(null);
-    throw new Error((data as any)?.error || `Request failed (${res.status})`);
+    throw new ApiError(res.status, (data as any)?.error || `Request failed (${res.status})`);
   }
   return data as T;
 }

@@ -126,7 +126,11 @@ export function expandIntent(
     buckets.get(merged)!.push(...baseBuckets.get(k)!);
   }
 
-  const perDayCount = card.per_day ? card.per_day.count[0] : 1;
+  // Per-day stacking: place the floor (count[0]); when fillToMax is on, band the
+  // day by the max (count[1]) and add the extra stacks as optional aspirations.
+  const perDayFloor = card.per_day ? card.per_day.count[0] : 1;
+  const perDayMax = card.per_day ? card.per_day.count[1] : 1;
+  const perDayBand = fillToMax ? Math.max(perDayFloor, perDayMax) : perDayFloor;
   const hasNestedSelection = !!card.days || !!card.per_day;
   const totalMin = card.total?.[0] ?? null;
   const totalMax = card.total?.[1] ?? null;
@@ -150,10 +154,10 @@ export function expandIntent(
       const days = buckets.get(key)!;
       const chosenDays = chooseDays(days, card);
       chosenDays.forEach((date) => {
-        for (let p = 0; p < perDayCount; p++) {
-          slots.push(
-            makeSlot(intentId, intent.subject, date, key, p, perDayCount, isCountDays, isCountDays ? days : undefined)
-          );
+        for (let p = 0; p < perDayBand; p++) {
+          const s = makeSlot(intentId, intent.subject, date, key, p, perDayBand, isCountDays, isCountDays ? days : undefined);
+          if (p >= perDayFloor) s.optional = true; // per-day aspiration (fillToMax)
+          slots.push(s);
         }
       });
 
@@ -166,8 +170,8 @@ export function expandIntent(
         if (extra > 0) {
           const remaining = days.filter((d) => !chosenDays.includes(d));
           for (const date of spreadPick(remaining, extra)) {
-            for (let p = 0; p < perDayCount; p++) {
-              const s = makeSlot(intentId, intent.subject, date, key, p, perDayCount, true, days);
+            for (let p = 0; p < perDayBand; p++) {
+              const s = makeSlot(intentId, intent.subject, date, key, p, perDayBand, true, days);
               s.optional = true;
               slots.push(s);
             }
