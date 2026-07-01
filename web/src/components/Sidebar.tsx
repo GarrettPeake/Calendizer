@@ -200,6 +200,18 @@ function ConfigCard({ config, onChange }: { config: GlobalConfig; onChange: (c: 
           <input type="checkbox" checked={config.fillToMax ?? false} onChange={(e) => set({ fillToMax: e.target.checked })} />
           Maximize events
         </label>
+        <label
+          className="chk"
+          style={{ marginTop: 8, color: 'var(--muted)' }}
+          title="When added to a calendar app subtasks will be individual events rather than the description of a single event"
+        >
+          <input
+            type="checkbox"
+            checked={config.subtasksAsEvents ?? false}
+            onChange={(e) => set({ subtasksAsEvents: e.target.checked })}
+          />
+          Subtasks as separate events
+        </label>
       </div>
     </div>
   );

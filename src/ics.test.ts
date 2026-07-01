@@ -46,12 +46,39 @@ test('without an offset: falls back to floating times, no VTIMEZONE', () => {
   assert.match(ics, /DTSTART:20260703T221500/);
 });
 
-test('children render as TZID-tagged VEVENTs too', () => {
+const withKids = () =>
+  inst({
+    subject: 'getting ready',
+    children: [
+      { subject: 'Do hair', start: '2026-07-03T22:15', end: '2026-07-03T22:25' },
+      { subject: 'Read', start: '2026-07-03T22:25', end: '2026-07-03T23:30' },
+    ],
+  });
+
+test('default: children are folded into the parent DESCRIPTION, not separate events', () => {
+  const ics = renderICS([withKids()], 'Calendizer', -420);
+  // exactly one VEVENT (the parent) — no child events
+  assert.equal(ics.match(/BEGIN:VEVENT/g)?.length, 1);
+  assert.doesNotMatch(ics, /::child/);
+  // a schedule line per child, "H:MM-H:MM (Nm): subject"
+  assert.match(ics, /DESCRIPTION:22:15-22:25 \(10m\): Do hair\\n22:25-23:30 \(65m\): Read/);
+});
+
+test('subtasksAsEvents=true: children render as their own TZID-tagged VEVENTs', () => {
+  const ics = renderICS([withKids()], 'Calendizer', -420, true);
+  assert.equal(ics.match(/BEGIN:VEVENT/g)?.length, 3); // parent + 2 children
+  assert.match(ics, /SUMMARY:Read/);
+  assert.match(ics, /DTSTART;TZID=Calendizer\/UTC-0700:20260703T222500/);
+  assert.doesNotMatch(ics, /^DESCRIPTION:/m);
+});
+
+test('DESCRIPTION text is escaped (comma) and long lines are folded', () => {
   const ics = renderICS(
-    [inst({ children: [{ subject: 'Read', start: '2026-07-03T22:18', end: '2026-07-03T23:30' }] })],
+    [inst({ children: [{ subject: 'Stretch, then plank', start: '2026-07-03T22:15', end: '2026-07-03T23:15' }] })],
     'Calendizer',
     -420
   );
-  assert.match(ics, /SUMMARY:Read/);
-  assert.match(ics, /DTSTART;TZID=Calendizer\/UTC-0700:20260703T221800/);
+  assert.match(ics, /Stretch\\, then plank/); // comma escaped
+  // no unfolded content line exceeds 75 octets
+  for (const line of ics.split('\r\n')) assert.ok(Buffer.byteLength(line, 'utf8') <= 75, `too long: ${line}`);
 });

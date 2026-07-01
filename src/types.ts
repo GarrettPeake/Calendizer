@@ -113,6 +113,13 @@ export interface GlobalConfig {
    * never forced into an overlap.
    */
   fillToMax?: boolean;
+  /**
+   * When true, an instance's children are emitted as their own separate calendar
+   * events in the ICS feed. Default false: children are instead summarised as a
+   * schedule in the parent event's DESCRIPTION (e.g. "7:05-7:15 (10m): Brush
+   * teeth"), so the calendar shows one event per instance.
+   */
+  subtasksAsEvents?: boolean;
 }
 
 /** An event already on the calendar (fixed, user-authored, immovable). */

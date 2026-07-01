@@ -27,6 +27,7 @@ export function defaultConfig(): GlobalConfig {
     max_block: 180,
     utcOffsetMinutes: 0,
     fillToMax: true,
+    subtasksAsEvents: false,
   };
 }
 
