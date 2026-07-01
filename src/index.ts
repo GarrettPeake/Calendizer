@@ -14,8 +14,10 @@ export { resolveTimeValue, resolveWindow } from './markers';
 export { solarTimes } from './solar';
 export { expandIntent } from './expand';
 export { tileChildren } from './children';
-export { activeModeOn, isIntentActiveOn, detectModeOverlaps } from './modes';
+export { activeModeOn, isIntentActiveOn, detectModeOverlaps, resolveModeName } from './modes';
 export { alignHorizonStart, overlay, realizedConflicts, isFullyPassed } from './temporal';
+export { assembleSchedule } from './schedule';
+export type { AssembleInput, AssembleResult, ModeRecord } from './schedule';
 export {
   validateIntent,
   validateMode,

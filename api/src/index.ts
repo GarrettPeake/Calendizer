@@ -3,11 +3,18 @@ import { cors } from 'hono/cors';
 import type { Env, Vars } from './env';
 import type { GlobalConfig, Instance, Intent, Mode, ValidationResult } from '../../src/index';
 import { validateIntent, validateMode, validateConfig, validateCredentials } from '../../src/index';
-import { localNow } from '../../src/time';
 import { hashPassword, verifyPassword, signToken, verifyToken } from './auth';
 import * as repo from './repo';
-import { getSolved } from './solveService';
+import {
+  getStoredCalendar,
+  storeCalendar,
+  resolveCalendar,
+  storedCalendarAgeDays,
+  type CalendarPayload,
+} from './solveService';
 import { parseSmart, parseSmartEdit } from './smart';
+
+const STALE_FEED_DAYS = 7; // feed re-solves server-side only if the stored calendar is older
 
 const app = new Hono<{ Bindings: Env; Variables: Vars }>();
 
@@ -31,25 +38,6 @@ function feedUrl(c: any, secret: string): string {
 }
 function publicUser(u: repo.UserRow) {
   return { id: u.id, username: u.username };
-}
-async function invalidate(c: any) {
-  const db = c.env.DB;
-  const userId = c.get('userId');
-  // Freeze the elapsed slice of the current projection BEFORE discarding it, so
-  // the immutable past survives an edit made before the next read (closes the
-  // edit-before-reread race where a fresh solve could otherwise rewrite history).
-  const cache = await repo.getCache(db, userId);
-  if (cache) {
-    const config = await repo.getConfig(db, userId);
-    const nowDT = localNow(config.utcOffsetMinutes ?? 0);
-    const instances: Instance[] = JSON.parse(cache.instances_json);
-    await repo.freezeInstances(
-      db,
-      userId,
-      instances.filter((i) => i.start < nowDT)
-    );
-  }
-  await repo.invalidateCache(db, userId);
 }
 /** First blocking error message, or null. Server rejects on errors; warnings pass. */
 function firstError(r: ValidationResult): string | null {
@@ -101,87 +89,92 @@ app.get('/api/auth/me', requireAuth, async (c) => {
 
 app.get('/api/config', requireAuth, async (c) => c.json(await repo.getConfig(c.env.DB, c.get('userId'))));
 
-app.put('/api/config', requireAuth, async (c) => {
-  const cfg = await c.req.json<GlobalConfig>();
-  const err = firstError(validateConfig(cfg));
-  if (err) return c.json({ error: err }, 400);
-  await repo.setConfig(c.env.DB, c.get('userId'), cfg);
-  await invalidate(c);
-  return c.json(cfg);
-});
-
-/* --------------------------------- intents --------------------------------- */
+/* --------------------------------- intents / modes (reads) --------------------------------- */
 
 app.get('/api/intents', requireAuth, async (c) => c.json(await repo.listIntents(c.env.DB, c.get('userId'))));
-
-app.post('/api/intents', requireAuth, async (c) => {
-  const intent = await c.req.json<Intent>();
-  const userId = c.get('userId');
-  const [config, modes] = await Promise.all([repo.getConfig(c.env.DB, userId), repo.listModes(c.env.DB, userId)]);
-  const err = firstError(validateIntent(intent, { config, modes }));
-  if (err) return c.json({ error: err }, 400);
-  const created = await repo.createIntent(c.env.DB, userId, intent);
-  await invalidate(c);
-  return c.json(created, 201);
-});
 
 app.get('/api/intents/:id', requireAuth, async (c) => {
   const intent = await repo.getIntent(c.env.DB, c.get('userId'), c.req.param('id'));
   return intent ? c.json(intent) : c.json({ error: 'Not found' }, 404);
 });
 
-app.put('/api/intents/:id', requireAuth, async (c) => {
-  const intent = await c.req.json<Intent>();
-  const userId = c.get('userId');
-  const [config, modes] = await Promise.all([repo.getConfig(c.env.DB, userId), repo.listModes(c.env.DB, userId)]);
-  const err = firstError(validateIntent(intent, { config, modes }));
-  if (err) return c.json({ error: err }, 400);
-  const updated = await repo.updateIntent(c.env.DB, userId, c.req.param('id'), intent);
-  if (!updated) return c.json({ error: 'Not found' }, 404);
-  await invalidate(c);
-  return c.json(updated);
-});
-
-app.delete('/api/intents/:id', requireAuth, async (c) => {
-  const ok = await repo.deleteIntent(c.env.DB, c.get('userId'), c.req.param('id'));
-  if (!ok) return c.json({ error: 'Not found' }, 404);
-  await invalidate(c);
-  return c.json({ ok: true });
-});
-
-/* --------------------------------- modes --------------------------------- */
-
 app.get('/api/modes', requireAuth, async (c) => c.json(await repo.listModes(c.env.DB, c.get('userId'))));
 
-app.post('/api/modes', requireAuth, async (c) => {
-  const mode = await c.req.json<Mode>();
-  const userId = c.get('userId');
-  const others = await repo.listModes(c.env.DB, userId);
-  const err = firstError(validateMode(mode, { others }));
-  if (err) return c.json({ error: err }, 400);
-  const created = await repo.createMode(c.env.DB, userId, mode);
-  await invalidate(c);
-  return c.json(created, 201);
+/* --------------------------------- calendar (read + atomic publish) --------------------------------- */
+
+// The stored published calendar (no solve). Empty payload before the first publish.
+app.get('/api/calendar', requireAuth, async (c) => {
+  const stored = await getStoredCalendar(c.env.DB, c.get('userId'));
+  if (!stored) return c.json({ instances: [], conflicts: [], horizon: null, computedAt: null, cached: false });
+  return c.json({
+    instances: stored.instances,
+    conflicts: stored.conflicts,
+    horizon: stored.horizon,
+    solveMs: stored.solveMs,
+    computedAt: stored.computedAt,
+    cached: true,
+  });
 });
 
-app.put('/api/modes/:id', requireAuth, async (c) => {
-  const mode = await c.req.json<Mode>();
-  const userId = c.get('userId');
-  const id = c.req.param('id');
-  const others = (await repo.listModes(c.env.DB, userId)).filter((m) => m.id !== id);
-  const err = firstError(validateMode(mode, { others }));
-  if (err) return c.json({ error: err }, 400);
-  const updated = await repo.updateMode(c.env.DB, userId, id, mode);
-  if (!updated) return c.json({ error: 'Not found' }, 404);
-  await invalidate(c);
-  return c.json(updated);
-});
+interface PublishBody {
+  mutations?: {
+    config?: GlobalConfig;
+    upsertIntents?: Intent[];
+    deleteIntentIds?: string[];
+    upsertModes?: (Mode & { id?: string })[];
+    deleteModeIds?: string[];
+  };
+  calendar: CalendarPayload;
+}
 
-app.delete('/api/modes/:id', requireAuth, async (c) => {
-  const ok = await repo.deleteMode(c.env.DB, c.get('userId'), c.req.param('id'));
-  if (!ok) return c.json({ error: 'Not found' }, 404);
-  await invalidate(c);
-  return c.json({ ok: true });
+// Atomic save: apply input mutations AND store the client-recomputed calendar in
+// ONE request, so intents/config/modes and the published calendar can't diverge.
+app.post('/api/publish', requireAuth, async (c) => {
+  const userId = c.get('userId');
+  const body = (await c.req.json().catch(() => ({}))) as PublishBody;
+  const cal = body.calendar;
+  if (!cal || !Array.isArray(cal.instances) || !cal.horizon) {
+    return c.json({ error: 'A calendar (instances + horizon) is required' }, 400);
+  }
+  const m = body.mutations ?? {};
+
+  // --- Validate everything against the POST-mutation effective state; reject all-or-nothing.
+  const config = m.config ?? (await repo.getConfig(c.env.DB, userId));
+  if (m.config) {
+    const e = firstError(validateConfig(m.config));
+    if (e) return c.json({ error: e }, 400);
+  }
+  const storedModes = await repo.listModes(c.env.DB, userId);
+  const deleteModeIds = new Set(m.deleteModeIds ?? []);
+  const effModes = [
+    ...storedModes.filter((x) => !deleteModeIds.has(x.id)).map((x) => ({ id: x.id, name: x.name, span: x.span })),
+    ...(m.upsertModes ?? []).map((md) => ({ id: md.id ?? '', name: md.name, span: md.span })),
+  ];
+  for (const md of m.upsertModes ?? []) {
+    const e = firstError(validateMode(md, { others: effModes.filter((o) => o.id !== (md.id ?? '')) }));
+    if (e) return c.json({ error: e }, 400);
+  }
+  for (const it of m.upsertIntents ?? []) {
+    const e = firstError(validateIntent(it, { config, modes: effModes }));
+    if (e) return c.json({ error: e }, 400);
+  }
+
+  // --- Apply mutations, then store the calendar (freeze + overlay + render ICS).
+  if (m.config) await repo.setConfig(c.env.DB, userId, m.config);
+  for (const md of m.upsertModes ?? []) await repo.upsertMode(c.env.DB, userId, md.id ?? crypto.randomUUID(), md);
+  for (const id of m.deleteModeIds ?? []) await repo.deleteMode(c.env.DB, userId, id);
+  for (const it of m.upsertIntents ?? []) await repo.upsertIntent(c.env.DB, userId, it);
+  for (const id of m.deleteIntentIds ?? []) await repo.deleteIntent(c.env.DB, userId, id);
+
+  const result = await storeCalendar(c.env.DB, userId, config, cal);
+  return c.json({
+    instances: result.instances,
+    conflicts: result.conflicts,
+    horizon: result.horizon,
+    solveMs: result.solveMs,
+    computedAt: result.computedAt,
+    cached: false,
+  });
 });
 
 /* --------------------------------- smart --------------------------------- */
@@ -206,25 +199,21 @@ app.post('/api/smart', requireAuth, async (c) => {
     return c.json({ error: e instanceof Error ? e.message : String(e) }, 502);
   }
 
-  // The model returns mode as a NAME (or "default"/"all"); resolve it to a stored
-  // mode ID so the intent links by id, not name.
-  let modeRecord = null;
+  // Does NOT persist — the client adds the intent (and any new mode) to its state
+  // and publishes atomically. The model returns mode as a NAME (or "default"/"all");
+  // resolve it to an existing mode id, or surface a new-mode DRAFT the client will
+  // create (assigning an id) and link the intent to.
+  let modeDraft: { name: string; span: [string, string] } | null = null;
   let modeRef = parsed.intent.mode;
   if (modeRef && modeRef !== 'default' && modeRef !== 'all') {
     const modes = await repo.listModes(c.env.DB, userId);
-    modeRecord = modes.find((m) => m.name === modeRef) ?? null;
-    if (!modeRecord && parsed.mode?.name) {
-      modeRecord = await repo.createMode(c.env.DB, userId, { name: parsed.mode.name, span: parsed.mode.span });
-    }
-    modeRef = modeRecord ? modeRecord.id : 'default';
+    const existing = modes.find((m) => m.name === modeRef);
+    if (existing) modeRef = existing.id;
+    else if (parsed.mode?.name) modeDraft = { name: parsed.mode.name, span: parsed.mode.span }; // keep modeRef = name
+    else modeRef = 'default';
   }
-  const draft = { ...parsed.intent, mode: modeRef };
-  const allModes = await repo.listModes(c.env.DB, userId);
-  const err = firstError(validateIntent(draft, { config, modes: allModes }));
-  if (err) return c.json({ error: `The AI produced an invalid intent: ${err}`, explanation: parsed.explanation }, 422);
-  const intent = await repo.createIntent(c.env.DB, userId, draft);
-  await invalidate(c);
-  return c.json({ intent, mode: modeRecord, explanation: parsed.explanation }, 201);
+  const intent = { ...parsed.intent, mode: modeRef };
+  return c.json({ intent, mode: modeDraft, explanation: parsed.explanation });
 });
 
 // Propose an edit to an intent from a natural-language instruction. Does NOT
@@ -280,20 +269,7 @@ app.get('/api/geo', requireAuth, (c) => {
   });
 });
 
-/* --------------------------------- solve + metrics --------------------------------- */
-
-app.get('/api/solve', requireAuth, async (c) => {
-  const r = await getSolved(c.env.DB, c.get('userId'));
-  c.header('X-Solve-Ms', String(r.solveMs));
-  return c.json({
-    instances: r.instances,
-    conflicts: r.conflicts,
-    horizon: r.horizon,
-    solveMs: r.solveMs,
-    computedAt: r.computedAt,
-    cached: r.cached,
-  });
-});
+/* --------------------------------- metrics --------------------------------- */
 
 app.get('/api/metrics', requireAuth, async (c) => {
   const recent = await repo.listMetrics(c.env.DB, c.get('userId'), 50);
@@ -349,7 +325,12 @@ app.get('/feed/:file', async (c) => {
   const secret = file.replace(/\.ics$/i, '');
   const user = await repo.getUserByFeedSecret(c.env.DB, secret);
   if (!user) return c.text('Not found', 404);
-  const r = await getSolved(c.env.DB, user.id);
+  // Serve the client-published calendar; only re-solve server-side (the fallback)
+  // if it's missing or older than the staleness threshold.
+  const config = await repo.getConfig(c.env.DB, user.id);
+  const age = await storedCalendarAgeDays(c.env.DB, user.id, config.utcOffsetMinutes ?? 0);
+  let r = await getStoredCalendar(c.env.DB, user.id);
+  if (!r || age > STALE_FEED_DAYS) r = await resolveCalendar(c.env.DB, user.id);
   const headers: Record<string, string> = {
     'Content-Type': 'text/calendar; charset=utf-8',
     'Content-Disposition': `inline; filename="calendizer.ics"`,

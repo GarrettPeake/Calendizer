@@ -129,6 +129,21 @@ export async function updateIntent(db: D1Database, userId: string, id: string, i
     .run();
   return stored;
 }
+/** Create-or-update an intent by id (the atomic /publish path). Returns the stored intent. */
+export async function upsertIntent(db: D1Database, userId: string, intent: Intent): Promise<Intent> {
+  const id = intent.id ?? crypto.randomUUID();
+  const stored: Intent = { ...intent, id };
+  const ts = now();
+  await db
+    .prepare(
+      `INSERT INTO intents (id, user_id, json, created_at, updated_at) VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET json = excluded.json, updated_at = excluded.updated_at`
+    )
+    .bind(id, userId, JSON.stringify(stored), ts, ts)
+    .run();
+  return stored;
+}
+
 export async function deleteIntent(db: D1Database, userId: string, id: string): Promise<boolean> {
   const res = await db.prepare(`DELETE FROM intents WHERE user_id = ? AND id = ?`).bind(userId, id).run();
   return (res.meta.changes ?? 0) > 0;
@@ -163,6 +178,18 @@ export async function updateMode(db: D1Database, userId: string, id: string, mod
   if ((res.meta.changes ?? 0) === 0) return null;
   return { id, name: mode.name, span: mode.span };
 }
+/** Create-or-update a mode by id (the atomic /publish path). */
+export async function upsertMode(db: D1Database, userId: string, id: string, mode: Mode): Promise<ModeRecord> {
+  await db
+    .prepare(
+      `INSERT INTO modes (id, user_id, name, start_date, end_date) VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET name = excluded.name, start_date = excluded.start_date, end_date = excluded.end_date`
+    )
+    .bind(id, userId, mode.name, mode.span[0], mode.span[1])
+    .run();
+  return { id, name: mode.name, span: mode.span };
+}
+
 export async function deleteMode(db: D1Database, userId: string, id: string): Promise<boolean> {
   const res = await db.prepare(`DELETE FROM modes WHERE user_id = ? AND id = ?`).bind(userId, id).run();
   return (res.meta.changes ?? 0) > 0;

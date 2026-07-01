@@ -1,7 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { GlobalConfig, Intent, Mode } from 'calendizer';
+import type { GlobalConfig, Intent, Mode, Instance } from 'calendizer';
 import { validateConfig } from 'calendizer';
-import { api, getToken, setToken, type FeedInfo, type ModeRecord, type SolveResponse, type User } from './api';
+import {
+  api,
+  getToken,
+  setToken,
+  type FeedInfo,
+  type ModeRecord,
+  type PublishMutations,
+  type SolveResponse,
+  type User,
+} from './api';
+import { computeSchedule } from './lib/solve';
 import { Login } from './Login';
 import { Sidebar } from './components/Sidebar';
 import { WeekCalendar } from './components/WeekCalendar';
@@ -71,40 +81,82 @@ export function App() {
   }, []);
 
   async function loadAll() {
-    const [cfg, ints, mds, slv, fd] = await Promise.all([
+    const [cfg, ints, mds, cal, fd] = await Promise.all([
       api.getConfig(),
       api.listIntents(),
       api.listModes(),
-      api.solve(),
+      api.getCalendar(),
       api.getFeed(),
     ]);
     setConfigState(cfg);
     setIntents(ints);
     setModes(mds);
-    setSolveResp(slv);
     setFeed(fd);
-  }
-
-  async function reload() {
-    const [ints, mds, slv] = await Promise.all([api.listIntents(), api.listModes(), api.solve()]);
-    setIntents(ints);
-    setModes(mds);
-    setSolveResp(slv);
+    // Show the last published calendar instantly, then recompute + republish (rolls
+    // the horizon, freezes elapsed occurrences, reaps dead intents).
+    if (cal.horizon) {
+      setSolveResp({
+        instances: cal.instances,
+        conflicts: cal.conflicts,
+        horizon: cal.horizon,
+        solveMs: cal.solveMs ?? 0,
+        computedAt: cal.computedAt ?? '',
+        cached: true,
+      });
+    }
+    await guard(publishState(cfg, ints, mds, {}, cal.instances));
   }
 
   function guard<T>(p: Promise<T>): Promise<T | void> {
     return p.catch((e) => setError(e instanceof Error ? e.message : String(e)));
   }
 
-  /* ---------------- config: debounced persist + re-solve ---------------- */
+  /**
+   * The single write path: recompute the calendar from the next inputs, render it
+   * optimistically, then publish the input mutations AND the calendar in ONE atomic
+   * request so they can never fall out of sync. `previousInstances` seeds the frozen
+   * past (defaults to the last rendered calendar).
+   */
+  async function publishState(
+    nextConfig: GlobalConfig,
+    nextIntents: Intent[],
+    nextModes: ModeRecord[],
+    mutations: PublishMutations,
+    previousInstances?: Instance[]
+  ) {
+    const previous = previousInstances ?? solveResp?.instances ?? [];
+    const r = computeSchedule(nextConfig, nextIntents, nextModes, previous);
+    const liveIntents = r.reapedIntentIds.length
+      ? nextIntents.filter((i) => !r.reapedIntentIds.includes(i.id!))
+      : nextIntents;
+    setConfigState(nextConfig);
+    setIntents(liveIntents);
+    setModes(nextModes);
+    setSolveResp({
+      instances: r.instances,
+      conflicts: r.conflicts,
+      horizon: r.horizon,
+      solveMs: r.solveMs,
+      computedAt: r.computedAt,
+      cached: false,
+    });
+    const stored = await api.publish(
+      { ...mutations, deleteIntentIds: [...(mutations.deleteIntentIds ?? []), ...r.reapedIntentIds] },
+      { instances: r.instances, conflicts: r.conflicts, horizon: r.horizon, computedAt: r.computedAt, solveMs: r.solveMs }
+    );
+    setSolveResp(stored);
+  }
+
+  /* ---------------- config: debounced recompute + publish ---------------- */
   useEffect(() => {
     if (!config || !configDirty.current) return;
-    const t = setTimeout(async () => {
+    const t = setTimeout(() => {
       if (!validateConfig(config).ok) return; // invalid — hold off until it's fixed
       configDirty.current = false;
-      await guard(api.putConfig(config).then(() => api.solve()).then(setSolveResp));
+      guard(publishState(config, intents, modes, { config }));
     }, 500);
     return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [config]);
 
   function changeConfig(next: GlobalConfig) {
@@ -140,8 +192,7 @@ export function App() {
   async function applyGeo() {
     if (!config || !geoProposal) return;
     const merged = { ...config, ...geoProposal.next };
-    setConfigState(merged);
-    await guard(api.putConfig(merged).then(() => api.solve()).then(setSolveResp));
+    await guard(publishState(merged, intents, modes, { config: merged }));
   }
   function dismissGeo() {
     if (!geoProposal) return;
@@ -149,25 +200,46 @@ export function App() {
     localStorage.setItem('calendizer_geo_dismissed', geoProposal.sig);
   }
 
-  /* ---------------- mutations ---------------- */
+  /* ---------------- mutations (all funnel through publishState) ---------------- */
   async function saveEditing(updated: Intent) {
-    if (!editing) return;
-    const p = editing.isNew ? api.createIntent(updated) : api.updateIntent(updated.id!, updated);
-    await guard(p.then(reload));
+    if (!editing || !config) return;
+    const withId: Intent = { ...updated, id: updated.id ?? crypto.randomUUID() };
+    const nextIntents = editing.isNew
+      ? [...intents, withId]
+      : intents.map((i) => (i.id === withId.id ? withId : i));
+    await guard(publishState(config, nextIntents, modes, { upsertIntents: [withId] }));
     setEditing(null);
   }
   async function deleteIntent(id: string) {
-    await guard(api.deleteIntent(id).then(reload));
+    if (!config) return;
+    await guard(publishState(config, intents.filter((i) => i.id !== id), modes, { deleteIntentIds: [id] }));
   }
   async function saveMode(mode: Mode) {
-    if (!editingMode) return;
-    const p = editingMode.mode ? api.updateMode(editingMode.mode.id, mode) : api.createMode(mode);
-    await guard(p.then(reload));
+    if (!editingMode || !config) return;
+    const id = editingMode.mode?.id ?? crypto.randomUUID();
+    const rec: ModeRecord = { ...mode, id };
+    const nextModes = editingMode.mode ? modes.map((m) => (m.id === id ? rec : m)) : [...modes, rec];
+    await guard(publishState(config, intents, nextModes, { upsertModes: [rec] }));
     setEditingMode(null);
   }
   async function aiAdd(query: string): Promise<{ explanation?: string }> {
+    if (!config) return {};
     const res = await api.smart(query);
-    await reload();
+    let nextModes = modes;
+    const upsertModes: ModeRecord[] = [];
+    let intent: Intent = { ...res.intent, id: res.intent.id ?? crypto.randomUUID() };
+    if (res.mode) {
+      const rec: ModeRecord = { id: crypto.randomUUID(), name: res.mode.name, span: res.mode.span };
+      nextModes = [...modes, rec];
+      upsertModes.push(rec);
+      intent = { ...intent, mode: rec.id }; // link the intent to the new mode's id
+    }
+    await guard(
+      publishState(config, [...intents, intent], nextModes, {
+        upsertIntents: [intent],
+        upsertModes: upsertModes.length ? upsertModes : undefined,
+      })
+    );
     return { explanation: res.explanation };
   }
   async function rotateFeed() {
@@ -271,7 +343,7 @@ export function App() {
         modes={modes}
         onNewMode={() => setEditingMode({ mode: null })}
         onEditMode={(m) => setEditingMode({ mode: m })}
-        onDeleteMode={(id) => guard(api.deleteMode(id).then(reload))}
+        onDeleteMode={(id) => config && guard(publishState(config, intents, modes.filter((m) => m.id !== id), { deleteModeIds: [id] }))}
         feed={feed}
         onRotateFeed={rotateFeed}
         onReportBug={() => setBugOpen(true)}

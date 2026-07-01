@@ -10,6 +10,22 @@
 import { Mode, Intent, ConflictReport } from './types';
 import { ISODate } from './time';
 
+/**
+ * Resolve an intent's mode reference to the NAME the solver expects. Intents may
+ * reference a mode by id, by the reserved "default"/"all", or (legacy) by name;
+ * the solver is name-based. A dangling id (mode deleted) falls back to "default".
+ */
+export function resolveModeName(
+  ref: string,
+  idToName: Map<string, string>,
+  nameSet: Set<string>
+): string {
+  if (ref === 'default' || ref === 'all') return ref;
+  if (idToName.has(ref)) return idToName.get(ref)!;
+  if (nameSet.has(ref)) return ref; // legacy name-based reference
+  return 'default'; // dangling id (mode deleted)
+}
+
 /** Returns the active mode name for a date, or null if outside all modes. */
 export function activeModeOn(date: ISODate, modes: Mode[]): string | null {
   for (const m of modes) {

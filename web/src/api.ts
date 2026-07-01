@@ -14,6 +14,29 @@ export interface SolveResponse {
   computedAt: string;
   cached: boolean;
 }
+/** The stored calendar; `horizon` is null before the first publish. */
+export interface StoredCalendar {
+  instances: Instance[];
+  conflicts: ConflictReport[];
+  horizon: { start: string; end: string } | null;
+  solveMs?: number;
+  computedAt: string | null;
+  cached: boolean;
+}
+export interface PublishMutations {
+  config?: GlobalConfig;
+  upsertIntents?: Intent[];
+  deleteIntentIds?: string[];
+  upsertModes?: ModeRecord[];
+  deleteModeIds?: string[];
+}
+export interface CalendarPayload {
+  instances: Instance[];
+  conflicts: ConflictReport[];
+  horizon: { start: string; end: string };
+  computedAt?: string;
+  solveMs?: number;
+}
 export interface User {
   id: string;
   username: string;
@@ -76,25 +99,23 @@ export const api = {
     req<{ token: string; user: User }>('POST', '/auth/login', { username, password }),
   me: () => req<{ user: User }>('GET', '/auth/me'),
 
-  // config
+  // reads (initial load)
   getConfig: () => req<GlobalConfig>('GET', '/config'),
-  putConfig: (config: GlobalConfig) => req<GlobalConfig>('PUT', '/config', config),
-
-  // intents
   listIntents: () => req<Intent[]>('GET', '/intents'),
-  createIntent: (intent: Intent) => req<Intent>('POST', '/intents', intent),
-  updateIntent: (id: string, intent: Intent) => req<Intent>('PUT', `/intents/${id}`, intent),
-  deleteIntent: (id: string) => req<{ ok: boolean }>('DELETE', `/intents/${id}`),
-
-  // modes
   listModes: () => req<ModeRecord[]>('GET', '/modes'),
-  createMode: (mode: Mode) => req<ModeRecord>('POST', '/modes', mode),
-  updateMode: (id: string, mode: Mode) => req<ModeRecord>('PUT', `/modes/${id}`, mode),
-  deleteMode: (id: string) => req<{ ok: boolean }>('DELETE', `/modes/${id}`),
+  getCalendar: () => req<StoredCalendar>('GET', '/calendar'),
 
-  // smart
+  // atomic write: input mutations + the client-recomputed calendar in one request
+  publish: (mutations: PublishMutations, calendar: CalendarPayload) =>
+    req<SolveResponse>('POST', '/publish', { mutations, calendar }),
+
+  // smart — parse only; the client adds the result to state and publishes
   smart: (query: string) =>
-    req<{ intent: Intent; mode: ModeRecord | null; explanation: string }>('POST', '/smart', { query }),
+    req<{ intent: Intent; mode: { name: string; span: [string, string] } | null; explanation: string }>(
+      'POST',
+      '/smart',
+      { query }
+    ),
   smartEdit: (intent: Intent, instruction: string) =>
     req<{ intent: Intent; updates: string; issues: string[] }>('POST', '/smart/edit', { intent, instruction }),
 
@@ -113,8 +134,7 @@ export const api = {
     schedule: Instance[];
   }) => req<{ ok: boolean; id: string }>('POST', '/bugs', payload),
 
-  // solve + metrics + feed
-  solve: () => req<SolveResponse>('GET', '/solve'),
+  // metrics + feed
   metrics: () => req<MetricsResponse>('GET', '/metrics'),
   getFeed: () => req<FeedInfo>('GET', '/feed'),
   rotateFeed: () => req<FeedInfo>('POST', '/feed/rotate'),
