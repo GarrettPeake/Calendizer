@@ -350,15 +350,21 @@ app.get('/feed/:file', async (c) => {
   const user = await repo.getUserByFeedSecret(c.env.DB, secret);
   if (!user) return c.text('Not found', 404);
   const r = await getSolved(c.env.DB, user.id);
-  return new Response(r.ics, {
-    status: 200,
-    headers: {
-      'Content-Type': 'text/calendar; charset=utf-8',
-      'Content-Disposition': `inline; filename="calendizer.ics"`,
-      'X-Solve-Ms': String(r.solveMs),
-      'Cache-Control': 'public, max-age=300',
-    },
-  });
+  const headers: Record<string, string> = {
+    'Content-Type': 'text/calendar; charset=utf-8',
+    'Content-Disposition': `inline; filename="calendizer.ics"`,
+    'X-Solve-Ms': String(r.solveMs),
+    'Cache-Control': 'public, max-age=300',
+    Vary: 'Accept-Encoding',
+  };
+  // The feed is large (~1.5MB of text) but highly compressible (~20x). Cloudflare
+  // doesn't auto-compress a Worker's text/calendar response, so gzip it here when
+  // the client supports it — turning a slow multi-MB pull into a ~60KB one.
+  if (/\bgzip\b/i.test(c.req.header('accept-encoding') ?? '')) {
+    const body = new Response(r.ics).body!.pipeThrough(new CompressionStream('gzip'));
+    return new Response(body, { status: 200, headers: { ...headers, 'Content-Encoding': 'gzip' } });
+  }
+  return new Response(r.ics, { status: 200, headers });
 });
 
 /* --------------------------------- static assets (SPA) --------------------------------- */
