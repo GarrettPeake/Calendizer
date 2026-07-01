@@ -118,15 +118,17 @@ export async function getSolved(db: D1Database, userId: string): Promise<SolvedR
   }
 
   // --- Solve whole, period-aligned buckets so cardinality spreads across the
-  // real period (not the truncated remainder). Seed the frozen past as immovable
-  // obstacles (no intentId ⇒ the solver treats them as fixed, never re-placed).
+  // real period (not the truncated remainder). Seed only STILL-IN-PROGRESS frozen
+  // events (end > now) as immovable obstacles: a future placement (start >= now)
+  // can only ever collide with a frozen event that hasn't finished yet. Seeding
+  // fully-elapsed events instead makes the solver's own re-projection of them
+  // collide with their frozen twin — spilling flexible days onto other dates and
+  // displacing real occurrences — for no benefit, since those projections are
+  // dropped by the overlay anyway.
   const frozen = await listFrozen(db, userId, retentionStart);
-  const existingCalendar: CalendarEvent[] = frozen.map((f) => ({
-    uid: f.uid,
-    subject: f.subject,
-    start: f.start,
-    end: f.end,
-  }));
+  const existingCalendar: CalendarEvent[] = frozen
+    .filter((f) => f.end > nowDT)
+    .map((f) => ({ uid: f.uid, subject: f.subject, start: f.start, end: f.end }));
   const horizon = { start: alignHorizonStart(today), end };
 
   const perf = (globalThis as any).performance;
