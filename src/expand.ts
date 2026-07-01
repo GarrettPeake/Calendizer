@@ -146,16 +146,17 @@ export function expandIntent(
     const allDates = candidates;
     const chosen = spreadPick(allDates, totalMin);
     chosen.forEach((date, i) => {
-      slots.push(makeSlot(intentId, intent.subject, date, 'span', i, 1, true, allDates));
+      slots.push(makeSlot(intentId, intent.subject, date, 'span', i, 1, i, true, allDates));
     });
   } else {
     // 3. Per-bucket day selection.
     for (const key of orderedKeys) {
       const days = buckets.get(key)!;
       const chosenDays = chooseDays(days, card);
+      let seq = 0; // unique occurrence index within this bucket
       chosenDays.forEach((date) => {
         for (let p = 0; p < perDayBand; p++) {
-          const s = makeSlot(intentId, intent.subject, date, key, p, perDayBand, isCountDays, isCountDays ? days : undefined);
+          const s = makeSlot(intentId, intent.subject, date, key, p, perDayBand, seq++, isCountDays, isCountDays ? days : undefined);
           if (p >= perDayFloor) s.optional = true; // per-day aspiration (fillToMax)
           slots.push(s);
         }
@@ -171,7 +172,7 @@ export function expandIntent(
           const remaining = days.filter((d) => !chosenDays.includes(d));
           for (const date of spreadPick(remaining, extra)) {
             for (let p = 0; p < perDayBand; p++) {
-              const s = makeSlot(intentId, intent.subject, date, key, p, perDayBand, true, days);
+              const s = makeSlot(intentId, intent.subject, date, key, p, perDayBand, seq++, true, days);
               s.optional = true;
               slots.push(s);
             }
@@ -196,7 +197,7 @@ export function expandIntent(
     const free = candidates.filter((d) => !usedDates.has(d));
     const extra = spreadPick(free.length ? free : candidates, extraNeeded);
     extra.forEach((date, i) =>
-      result.push(makeSlot(intentId, intent.subject, date, 'floor', i, 1, true, candidates))
+      result.push(makeSlot(intentId, intent.subject, date, 'floor', i, 1, i, true, candidates))
     );
   }
 
@@ -228,6 +229,13 @@ function makeSlot(
   bucketKey: string,
   perDayIndex: number,
   perDayCount: number,
+  /**
+   * Occurrence index WITHIN the bucket, unique across its (day × per_day) slots.
+   * The uid keys on this rather than perDayIndex so that multiple occurrences in
+   * one week/month/mode bucket don't collide (they'd all be perDayIndex 0). A
+   * single-occurrence or daily bucket keeps seq 0, so those uids are unchanged.
+   */
+  seq: number,
   flexibleDay = false,
   bucketDates?: ISODate[]
 ): Slot {
@@ -238,7 +246,7 @@ function makeSlot(
     bucketKey,
     perDayIndex,
     perDayCount,
-    uid: `${intentId}|${bucketKey}|${perDayIndex}`,
+    uid: `${intentId}|${bucketKey}|${seq}`,
     flexibleDay,
     bucketDates,
   };
