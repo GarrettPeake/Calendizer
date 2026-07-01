@@ -142,7 +142,7 @@ export async function getSolved(db: D1Database, userId: string): Promise<SolvedR
   // Drop conflicts that no longer correspond to a real overlap in the overlaid
   // output (e.g. a dropped past projection colliding with its own frozen twin).
   const conflicts = realizedConflicts(out.conflicts, instances, today);
-  const ics = renderICS(instances);
+  const ics = renderICS(instances, 'Calendizer', config.utcOffsetMinutes);
   const computedAt = new Date().toISOString();
 
   // Return a retention-window-aligned start so the web can page ~3 months back.
