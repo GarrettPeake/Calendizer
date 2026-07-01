@@ -30,7 +30,11 @@ export type TimeValue = string | MarkerTime;
 export interface Window {
   not_before?: TimeValue;
   not_after?: TimeValue;
+  /** Pinned start: the occurrence starts exactly here. Mutually exclusive with ends_at. */
   starts_at?: TimeValue;
+  /** Pinned end: the occurrence ends exactly here (its start = end − duration), so a
+   *  flexible-duration routine can butt up against a marker like bedtime. */
+  ends_at?: TimeValue;
   /** Per-weekday overrides keyed by comma-joined weekday codes, e.g. "TU,TH,SU". */
   overrides?: Record<string, Partial<Omit<Window, 'overrides'>>>;
 }

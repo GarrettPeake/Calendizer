@@ -17,7 +17,8 @@ interface Intent {
   window: {
     not_before?: TimeValue;        // earliest start
     not_after?: TimeValue;         // latest end
-    starts_at?: TimeValue;         // pin the start exactly
+    starts_at?: TimeValue;         // pin the start exactly (mutually exclusive with ends_at)
+    ends_at?: TimeValue;           // pin the end exactly (e.g. butt a routine up against bedtime)
     overrides?: { "<WEEKDAYS>": Partial<Window> };
   };
   children?: ({subject:string,duration:number} | {subject:string,weight:number})[];

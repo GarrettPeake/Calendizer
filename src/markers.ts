@@ -44,6 +44,8 @@ export interface ResolvedWindow {
   notAfter: number;
   /** Pinned start if specified, else null. */
   startsAt: number | null;
+  /** Pinned end if specified, else null. */
+  endsAt: number | null;
 }
 
 const DAY_START = 0;
@@ -61,6 +63,7 @@ export function resolveWindow(
   let notBefore = window.not_before;
   let notAfter = window.not_after;
   let startsAt = window.starts_at;
+  let endsAt = window.ends_at;
 
   const wd = weekdayCode(date);
   if (window.overrides) {
@@ -70,6 +73,7 @@ export function resolveWindow(
         if (partial.not_before !== undefined) notBefore = partial.not_before;
         if (partial.not_after !== undefined) notAfter = partial.not_after;
         if (partial.starts_at !== undefined) startsAt = partial.starts_at;
+        if (partial.ends_at !== undefined) endsAt = partial.ends_at;
       }
     }
   }
@@ -78,6 +82,7 @@ export function resolveWindow(
     notBefore: notBefore !== undefined ? resolveTimeValue(notBefore, date, config) : DAY_START,
     notAfter: notAfter !== undefined ? resolveTimeValue(notAfter, date, config) : DAY_END,
     startsAt: startsAt !== undefined ? resolveTimeValue(startsAt, date, config) : null,
+    endsAt: endsAt !== undefined ? resolveTimeValue(endsAt, date, config) : null,
   };
 }
 

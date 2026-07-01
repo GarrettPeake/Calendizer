@@ -15,7 +15,11 @@ interface OverrideRow {
   not_before?: TimeValue;
   not_after?: TimeValue;
   starts_at?: TimeValue;
+  ends_at?: TimeValue;
 }
+
+/** A TimeValue is "set" unless it's undefined or an empty clock string. */
+const isTimeSet = (tv?: TimeValue) => tv != null && !(typeof tv === 'string' && tv === '');
 
 /** window.overrides record → editable rows. */
 function overridesToRows(overrides: Window['overrides']): OverrideRow[] {
@@ -37,6 +41,7 @@ function rowsToOverrides(rows: OverrideRow[]): Window['overrides'] | undefined {
     if (r.not_before !== undefined) partial.not_before = r.not_before;
     if (r.not_after !== undefined) partial.not_after = r.not_after;
     if (r.starts_at !== undefined) partial.starts_at = r.starts_at;
+    if (r.ends_at !== undefined) partial.ends_at = r.ends_at;
     if (Object.keys(partial).length === 0) continue;
     rec[key] = partial;
   }
@@ -159,8 +164,10 @@ export function IntentEditor(props: {
   // "Max" fields only take effect when the global "Maximize events" is on.
   const maximizeOff = !props.config?.fillToMax;
   const maxHint = maximizeOff ? 'Only used when “Maximize events” is on (in Calendar config).' : undefined;
-  // A pinned start overrides the before/after bounds — disable them while pinned.
-  const pinned = d.window.starts_at != null && !(typeof d.window.starts_at === 'string' && d.window.starts_at === '');
+  // A pinned start/end fixes an edge, so the before/after bounds and the other pin
+  // are constrained. starts_at and ends_at are mutually exclusive.
+  const startPinned = isTimeSet(d.window.starts_at);
+  const endPinned = isTimeSet(d.window.ends_at);
 
   return (
     <div className="modal-overlay" onMouseDown={props.onCancel}>
@@ -245,21 +252,29 @@ export function IntentEditor(props: {
             <TimeValueField
               label="Can't start before"
               value={d.window.not_before}
-              disabled={pinned}
+              disabled={startPinned}
               onChange={(tv) => patchWindow({ not_before: tv })}
             />
             <TimeValueField
               label="Can't end after"
               value={d.window.not_after}
-              disabled={pinned}
+              disabled={startPinned || endPinned}
               onChange={(tv) => patchWindow({ not_after: tv })}
             />
             <TimeValueField
               label="Starts exactly at (pin)"
               value={d.window.starts_at}
+              disabled={endPinned}
               onChange={(tv) => patchWindow({ starts_at: tv })}
             />
-            {pinned ? <div className="hint-cell">A fixed start time overrides “can’t start before / end after”.</div> : null}
+            <TimeValueField
+              label="Ends exactly at (pin)"
+              value={d.window.ends_at}
+              disabled={startPinned}
+              onChange={(tv) => patchWindow({ ends_at: tv })}
+            />
+            {startPinned ? <div className="hint-cell">A fixed start time overrides “can’t start before / end after”.</div> : null}
+            {endPinned ? <div className="hint-cell">A fixed end time butts the occurrence up against it — the duration fills backward from here.</div> : null}
             <FieldMsgs result={v} field="window" />
 
             {/* Per-weekday overrides */}
@@ -272,7 +287,8 @@ export function IntentEditor(props: {
                 <div className="hint-cell">Optional. Different timing on specific weekdays (e.g. a later start on TU/TH).</div>
               ) : (
                 oRows.map((row) => {
-                  const rowPinned = row.starts_at != null && !(typeof row.starts_at === 'string' && row.starts_at === '');
+                  const rowStartPinned = isTimeSet(row.starts_at);
+                  const rowEndPinned = isTimeSet(row.ends_at);
                   return (
                     <div className="override-row" key={row.id}>
                       <div className="override-row-head">
@@ -290,9 +306,10 @@ export function IntentEditor(props: {
                         </div>
                         <button className="x small" onClick={() => removeRow(row.id)} title="Remove override">×</button>
                       </div>
-                      <TimeValueField label="Can't start before" value={row.not_before} disabled={rowPinned} onChange={(tv) => updateRow(row.id, { not_before: tv })} />
-                      <TimeValueField label="Can't end after" value={row.not_after} disabled={rowPinned} onChange={(tv) => updateRow(row.id, { not_after: tv })} />
-                      <TimeValueField label="Starts exactly at (pin)" value={row.starts_at} onChange={(tv) => updateRow(row.id, { starts_at: tv })} />
+                      <TimeValueField label="Can't start before" value={row.not_before} disabled={rowStartPinned} onChange={(tv) => updateRow(row.id, { not_before: tv })} />
+                      <TimeValueField label="Can't end after" value={row.not_after} disabled={rowStartPinned || rowEndPinned} onChange={(tv) => updateRow(row.id, { not_after: tv })} />
+                      <TimeValueField label="Starts exactly at (pin)" value={row.starts_at} disabled={rowEndPinned} onChange={(tv) => updateRow(row.id, { starts_at: tv })} />
+                      <TimeValueField label="Ends exactly at (pin)" value={row.ends_at} disabled={rowStartPinned} onChange={(tv) => updateRow(row.id, { ends_at: tv })} />
                     </div>
                   );
                 })

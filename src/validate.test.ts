@@ -67,6 +67,13 @@ test('window overrides: valid passes; bad clock, bad weekday key, and inverted b
   assert.ok(hasErr(validateIntent(baseIntent({ window: { overrides: { MO: { not_before: '20:00', not_after: '10:00' } } } })), 'window.overrides'));
 });
 
+test('window ends_at: valid passes; both start and end pins block', () => {
+  assert.ok(validateIntent(baseIntent({ window: { ends_at: { marker: 'sleep' } } })).ok);
+  assert.ok(validateIntent(baseIntent({ window: { ends_at: '22:00' } })).ok);
+  assert.ok(hasErr(validateIntent(baseIntent({ window: { ends_at: '9pm' } })), 'window'));
+  assert.ok(hasErr(validateIntent(baseIntent({ window: { starts_at: '20:00', ends_at: '22:00' } })), 'window'));
+});
+
 test('interval below 1 blocks', () => {
   assert.ok(hasErr(validateIntent(baseIntent({ cardinality: { period: { unit: 'week', interval: 0 }, days: { count: [1, 1] } } })), 'period'));
 });

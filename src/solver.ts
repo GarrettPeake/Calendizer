@@ -58,8 +58,10 @@ interface Placement {
   startMin: number;
   durationMin: number;
   placedDuringSleep: boolean;
-  /** Pinned (starts_at) placements are immovable and never shifted by repair. */
+  /** Pinned (starts_at or ends_at) placements are immovable and never shifted by repair. */
   pinned: boolean;
+  /** ends_at pin: the END is fixed, so fillToMax grows the duration BACKWARD. */
+  endPinned: boolean;
 }
 
 export function solve(input: SolveInput): SolveOutput {
@@ -101,13 +103,17 @@ export function solve(input: SolveInput): SolveOutput {
     intent: Intent;
     slot: Slot;
     pinned: boolean;
+    /** True when the pin is an ends_at (end fixed, start = end − duration). */
+    endPinned: boolean;
     rank: number; // index in `ordered` (encodes priority/subject/id)
   }
   const items: Item[] = [];
   ordered.forEach((intent, rank) => {
     for (const slot of expandIntent(intent, horizonDates, modes, config.fillToMax)) {
-      const pinned = resolveWindow(intent.window, slot.date, config).startsAt !== null;
-      items.push({ intent, slot, pinned, rank });
+      const rw = resolveWindow(intent.window, slot.date, config);
+      const pinned = rw.startsAt !== null || rw.endsAt !== null;
+      const endPinned = rw.startsAt === null && rw.endsAt !== null; // starts_at wins if both
+      items.push({ intent, slot, pinned, endPinned, rank });
     }
   });
   // Placement tiers: pinned (hard) first, then guaranteed (floor), then optional
@@ -127,7 +133,7 @@ export function solve(input: SolveInput): SolveOutput {
 
   // --- Greedy pass: seed each occurrence at its best (min-overlap) slot. ---
   const placements: Placement[] = [];
-  for (const { intent, slot, pinned } of items) {
+  for (const { intent, slot, pinned, endPinned } of items) {
     const bp = bestPlacement(slot, intent, config, occupied, origin);
     // Aspiration (optional) occurrences are placed only when they fit cleanly;
     // otherwise they are silently dropped (never forced, never a conflict).
@@ -140,6 +146,7 @@ export function solve(input: SolveInput): SolveOutput {
       durationMin: intent.duration[0],
       placedDuringSleep: bp.placedDuringSleep,
       pinned,
+      endPinned,
     };
     placements.push(placement);
     occupied.push(occFor(placement, origin));
@@ -214,6 +221,17 @@ function bestPlacement(
   const pinnedWin = resolveWindow(intent.window, slot.date, config);
   if (pinnedWin.startsAt !== null) {
     const start = pinnedWin.startsAt;
+    return {
+      date: slot.date,
+      startMin: start,
+      placedDuringSleep: isInSleep(start, durationMin, slot.date, config),
+      overlapMin: overlapAt(occupied, origin, slot.date, start, durationMin),
+      unsatisfiable: false,
+    };
+  }
+  // Pinned end: the end is fixed; start = end − floor (fillToMax grows it backward).
+  if (pinnedWin.endsAt !== null) {
+    const start = pinnedWin.endsAt - durationMin;
     return {
       date: slot.date,
       startMin: start,
@@ -504,10 +522,13 @@ function distributeDurations(placements: Placement[], fixed: Occupied[], config:
 }
 
 /**
- * Grow a lone flexible occurrence's duration in place (start fixed) to fill the
- * free room after it — up to its max — bounded by its window end, the next
- * obstacle (fixed event or other placement, minus padding), and the evening
- * sleep blackout. Never shrinks and can't create an overlap.
+ * Grow a flexible occurrence's duration in place, up to its max, without moving
+ * its anchored edge and without creating an overlap. A start-anchored occurrence
+ * (lone flexible, or a starts_at pin) grows its END forward; an ends_at pin keeps
+ * its END fixed and grows its START backward. Bounded by the window, the adjacent
+ * obstacle (minus padding), and the sleep blackout. Never shrinks. We cap by the
+ * exact limit rather than snapping to grid: a marker-pinned edge (e.g. sunset,
+ * bedtime) is off-grid, and snapping would strand a few minutes below the max.
  */
 function growInPlace(
   p: Placement,
@@ -518,11 +539,40 @@ function growInPlace(
   origin: ISODate
 ): void {
   const padding = config.padding ?? 0;
-  const start = p.startMin;
   const w = resolveWindow(p.intent.window, date, config);
   const dayBase = absoluteMinutes(origin, date, 0);
+  const { sleepStart, wakeStart } = resolveSleepBlackout(date, config);
 
-  let limit = w.notAfter; // must end by the window's not_after
+  if (p.endPinned) {
+    // End fixed; grow the start backward toward the earliest legal start.
+    const end = p.startMin + p.durationMin;
+    let limit = w.notBefore; // earliest legal start
+    const consider = (obstacleEnd: number) => {
+      if (obstacleEnd <= p.startMin) limit = Math.max(limit, obstacleEnd + padding);
+    };
+    for (const o of fixed) {
+      if (o.endAbs > dayBase && o.startAbs < dayBase + 1440) consider(o.endAbs - dayBase);
+    }
+    for (const q of placements) {
+      if (q === p || q.date !== date) continue;
+      consider(q.startMin + q.durationMin);
+    }
+    // Don't grow into the morning blackout unless the event already ends there.
+    if (end > wakeStart) limit = Math.max(limit, wakeStart);
+
+    const newStart = Math.max(limit, end - p.intent.duration[1]);
+    const newDur = end - newStart;
+    if (newDur > p.durationMin) {
+      p.startMin = newStart;
+      p.durationMin = newDur;
+      p.placedDuringSleep = isInSleep(newStart, newDur, date, config);
+    }
+    return;
+  }
+
+  // Start fixed; grow the end forward toward the latest legal end.
+  const start = p.startMin;
+  let limit = w.notAfter;
   const consider = (obstacleStart: number) => {
     if (obstacleStart > start) limit = Math.min(limit, obstacleStart - padding);
   };
@@ -534,13 +584,8 @@ function growInPlace(
     consider(q.startMin);
   }
   // Don't grow into the evening blackout unless the event already starts there.
-  const { sleepStart } = resolveSleepBlackout(date, config);
   if (start < sleepStart) limit = Math.min(limit, sleepStart);
 
-  // Grow toward the duration max, bounded by the room available. We cap by the
-  // exact limit rather than snapping to the grid: starts are grid-aligned but a
-  // marker-pinned start (e.g. sunset) isn't, and snapping the end would strand a
-  // few minutes below the max the user asked for.
   const newDur = Math.min(p.intent.duration[1], limit - start);
   if (newDur > p.durationMin) {
     p.durationMin = newDur;

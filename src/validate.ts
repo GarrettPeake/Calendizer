@@ -112,10 +112,14 @@ export function validateIntent(intent: Intent, ctx: IntentValidationContext = {}
 
   /* --- Window / timing --- */
   const win = intent.window ?? {};
+  if (win.starts_at !== undefined && win.ends_at !== undefined) {
+    b.err('window.ends_at', 'Pin either a fixed start or a fixed end, not both.');
+  }
   for (const [key, label] of [
     ['not_before', "'Can't start before'"],
     ['not_after', "'Can't end after'"],
     ['starts_at', "'Starts exactly at'"],
+    ['ends_at', "'Ends exactly at'"],
   ] as const) {
     const tv = win[key];
     if (typeof tv === 'string' && !isValidClock(tv)) {
@@ -142,10 +146,14 @@ export function validateIntent(intent: Intent, ctx: IntentValidationContext = {}
     if (codes.length === 0 || codes.some((c) => !WEEKDAY_CODES.has(c))) {
       b.err('window.overrides', `Override "${key}" must target valid weekdays (MO, TU, WE, TH, FR, SA, SU).`);
     }
+    if (partial.starts_at !== undefined && partial.ends_at !== undefined) {
+      b.err('window.overrides', `Override for ${label}: pin either a fixed start or a fixed end, not both.`);
+    }
     for (const [k, fieldLabel] of [
       ['not_before', "'Can't start before'"],
       ['not_after', "'Can't end after'"],
       ['starts_at', "'Starts exactly at'"],
+      ['ends_at', "'Ends exactly at'"],
     ] as const) {
       const tv = partial[k];
       if (typeof tv === 'string' && !isValidClock(tv)) {
