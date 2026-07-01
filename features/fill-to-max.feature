@@ -210,6 +210,35 @@ Feature: Filling flexible counts toward their max (fillToMax)
     And no occurrence overlaps the fixed event "gathering"
     And there are no conflicts
 
+  Scenario: A contended flexible task is not packed into pre-wakeup sleep time
+    # wakeup is 08:00; workout's window opens at 07:00 (before wake). Even when it
+    # shares the day with another flexible task (contended re-pack), it must not be
+    # packed into the 07:00-08:00 sleep gap — it lands after standup, in waking hours.
+    Given wakeup is "08:00" and sleep is "23:00"
+    And fill toward max is enabled
+    And an existing fixed event "standup" on "2026-07-07" from "08:00" to "09:00"
+    When I add the intents:
+      """
+      [
+        {
+          "subject": "workout", "mode": "default", "priority": 50,
+          "duration": [30, 60],
+          "window": { "not_before": "07:00", "not_after": "23:00" },
+          "cardinality": { "days": { "dates": ["2026-07-07"] } }
+        },
+        {
+          "subject": "reading", "mode": "default", "priority": 40,
+          "duration": [30, 120],
+          "window": { "not_before": "07:00", "not_after": "23:00" },
+          "cardinality": { "days": { "dates": ["2026-07-07"] } }
+        }
+      ]
+      """
+    And I solve
+    Then every occurrence of "workout" starts at or after "08:00"
+    And no occurrence is marked as placed during sleep
+    And there are no conflicts
+
   Scenario: Extras fill each week across a multi-week horizon
     Given the planning horizon is "2026-07-06" to "2026-07-19"
     And fill toward max is enabled

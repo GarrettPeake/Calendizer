@@ -440,6 +440,11 @@ function distributeDurations(placements: Placement[], fixed: Occupied[], config:
       for (const o of fixed) {
         if (o.endAbs > dayBase && o.startAbs < dayBase + 1440) clip(o.startAbs - dayBase, o.endAbs - dayBase);
       }
+      // Treat the sleep blackout as an obstacle so packing prefers waking hours.
+      // If this leaves too little room the floors>=capacity guard below yields it.
+      const { sleepStart, wakeStart } = resolveSleepBlackout(date, config);
+      clip(0, wakeStart);
+      clip(sleepStart, DAY_END);
       const inGroup = new Set(group);
       for (const p of placements) {
         if (inGroup.has(p) || p.date !== date) continue;
