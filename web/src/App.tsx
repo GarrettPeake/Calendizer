@@ -5,13 +5,17 @@ import {
   api,
   getToken,
   setToken,
+  type CalendarPayload,
   type FeedInfo,
   type ModeRecord,
-  type PublishMutations,
+  type PublishState,
   type SolveResponse,
   type User,
 } from './api';
 import { computeSchedule } from './lib/solve';
+
+type SaveStatus = 'saved' | 'processing' | 'saving' | 'error';
+const SAVE_RETRIES = 3;
 import { Login } from './Login';
 import { Sidebar } from './components/Sidebar';
 import { WeekCalendar } from './components/WeekCalendar';
@@ -60,6 +64,26 @@ export function App() {
 
   const configDirty = useRef(false);
 
+  // --- async save manager: edits are instant; recompute + publish run in the
+  // background with a status indicator, coalescing, retries, and a failure toast.
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>('saved');
+  const [toast, setToast] = useState<string | null>(null);
+  const pendingSave = useRef<{ state: PublishState; calendar: CalendarPayload } | null>(null);
+  const saving = useRef(false);
+  const unsaved = useRef(false); // gates the navigate-away warning
+
+  // Warn before leaving with an unsaved (unpublished or failed) change.
+  useEffect(() => {
+    const handler = (e: BeforeUnloadEvent) => {
+      if (unsaved.current) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, []);
+
   /* ---------------- boot: validate token, load everything ---------------- */
   useEffect(() => {
     (async () => {
@@ -104,7 +128,7 @@ export function App() {
         cached: true,
       });
     }
-    await guard(publishState(cfg, ints, mds, {}, cal.instances));
+    applyChange(cfg, ints, mds, cal.instances);
   }
 
   function guard<T>(p: Promise<T>): Promise<T | void> {
@@ -112,39 +136,89 @@ export function App() {
   }
 
   /**
-   * The single write path: recompute the calendar from the next inputs, render it
-   * optimistically, then publish the input mutations AND the calendar in ONE atomic
-   * request so they can never fall out of sync. `previousInstances` seeds the frozen
-   * past (defaults to the last rendered calendar).
+   * Drain the pending save: publish the latest queued state+calendar, retrying a
+   * few times. Coalesces — if newer edits arrive mid-flight they replace the queued
+   * payload, so only the latest is ever sent. On total failure: a toast + the change
+   * stays flagged unsaved (the navigate-away warning stays armed).
    */
-  async function publishState(
+  async function pumpSaves() {
+    if (saving.current) return;
+    saving.current = true;
+    try {
+      while (pendingSave.current) {
+        const payload = pendingSave.current;
+        pendingSave.current = null;
+        setSaveStatus('saving');
+        let ok = false;
+        for (let attempt = 0; attempt < SAVE_RETRIES && !ok; attempt++) {
+          try {
+            const stored = await api.publish(payload.state, payload.calendar);
+            setSolveResp(stored);
+            ok = true;
+          } catch {
+            if (attempt < SAVE_RETRIES - 1) await new Promise((r) => setTimeout(r, 400 * (attempt + 1)));
+          }
+        }
+        if (!ok) {
+          if (!pendingSave.current) pendingSave.current = payload; // keep latest for a later retry
+          setSaveStatus('error');
+          setToast('Unable to save the last change, please refresh the page and try again');
+          return;
+        }
+      }
+      if (!pendingSave.current) {
+        unsaved.current = false;
+        setSaveStatus('saved');
+      }
+    } finally {
+      saving.current = false;
+    }
+  }
+
+  /**
+   * The single write path. Applies the next inputs to local state INSTANTLY, then
+   * recomputes the calendar and queues an async publish (recompute is deferred a
+   * tick so the edit feels immediate). Inputs and calendar publish together, so
+   * they can never diverge.
+   */
+  function applyChange(
     nextConfig: GlobalConfig,
     nextIntents: Intent[],
     nextModes: ModeRecord[],
-    mutations: PublishMutations,
     previousInstances?: Instance[]
   ) {
     const previous = previousInstances ?? solveResp?.instances ?? [];
-    const r = computeSchedule(nextConfig, nextIntents, nextModes, previous);
-    const liveIntents = r.reapedIntentIds.length
-      ? nextIntents.filter((i) => !r.reapedIntentIds.includes(i.id!))
-      : nextIntents;
     setConfigState(nextConfig);
-    setIntents(liveIntents);
+    setIntents(nextIntents);
     setModes(nextModes);
-    setSolveResp({
-      instances: r.instances,
-      conflicts: r.conflicts,
-      horizon: r.horizon,
-      solveMs: r.solveMs,
-      computedAt: r.computedAt,
-      cached: false,
-    });
-    const stored = await api.publish(
-      { ...mutations, deleteIntentIds: [...(mutations.deleteIntentIds ?? []), ...r.reapedIntentIds] },
-      { instances: r.instances, conflicts: r.conflicts, horizon: r.horizon, computedAt: r.computedAt, solveMs: r.solveMs }
-    );
-    setSolveResp(stored);
+    unsaved.current = true;
+    setSaveStatus('processing');
+    setTimeout(() => {
+      const r = computeSchedule(nextConfig, nextIntents, nextModes, previous);
+      const liveIntents = r.reapedIntentIds.length
+        ? nextIntents.filter((i) => !r.reapedIntentIds.includes(i.id!))
+        : nextIntents;
+      if (r.reapedIntentIds.length) setIntents(liveIntents);
+      setSolveResp({
+        instances: r.instances,
+        conflicts: r.conflicts,
+        horizon: r.horizon,
+        solveMs: r.solveMs,
+        computedAt: r.computedAt,
+        cached: false,
+      });
+      pendingSave.current = {
+        state: { config: nextConfig, intents: liveIntents, modes: nextModes },
+        calendar: {
+          instances: r.instances,
+          conflicts: r.conflicts,
+          horizon: r.horizon,
+          computedAt: r.computedAt,
+          solveMs: r.solveMs,
+        },
+      };
+      pumpSaves();
+    }, 0);
   }
 
   /* ---------------- config: debounced recompute + publish ---------------- */
@@ -153,7 +227,7 @@ export function App() {
     const t = setTimeout(() => {
       if (!validateConfig(config).ok) return; // invalid — hold off until it's fixed
       configDirty.current = false;
-      guard(publishState(config, intents, modes, { config }));
+      applyChange(config, intents, modes);
     }, 500);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -189,10 +263,9 @@ export function App() {
 
   const geoProposal = useMemo(() => (config && detected ? buildProposal(config, detected) : null), [config, detected]);
 
-  async function applyGeo() {
+  function applyGeo() {
     if (!config || !geoProposal) return;
-    const merged = { ...config, ...geoProposal.next };
-    await guard(publishState(merged, intents, modes, { config: merged }));
+    applyChange({ ...config, ...geoProposal.next }, intents, modes);
   }
   function dismissGeo() {
     if (!geoProposal) return;
@@ -200,46 +273,39 @@ export function App() {
     localStorage.setItem('calendizer_geo_dismissed', geoProposal.sig);
   }
 
-  /* ---------------- mutations (all funnel through publishState) ---------------- */
-  async function saveEditing(updated: Intent) {
+  /* ---------------- mutations (all funnel through applyChange → async save) ---------------- */
+  function saveEditing(updated: Intent) {
     if (!editing || !config) return;
     const withId: Intent = { ...updated, id: updated.id ?? crypto.randomUUID() };
     const nextIntents = editing.isNew
       ? [...intents, withId]
       : intents.map((i) => (i.id === withId.id ? withId : i));
-    await guard(publishState(config, nextIntents, modes, { upsertIntents: [withId] }));
+    applyChange(config, nextIntents, modes);
     setEditing(null);
   }
-  async function deleteIntent(id: string) {
+  function deleteIntent(id: string) {
     if (!config) return;
-    await guard(publishState(config, intents.filter((i) => i.id !== id), modes, { deleteIntentIds: [id] }));
+    applyChange(config, intents.filter((i) => i.id !== id), modes);
   }
-  async function saveMode(mode: Mode) {
+  function saveMode(mode: Mode) {
     if (!editingMode || !config) return;
     const id = editingMode.mode?.id ?? crypto.randomUUID();
     const rec: ModeRecord = { ...mode, id };
     const nextModes = editingMode.mode ? modes.map((m) => (m.id === id ? rec : m)) : [...modes, rec];
-    await guard(publishState(config, intents, nextModes, { upsertModes: [rec] }));
+    applyChange(config, intents, nextModes);
     setEditingMode(null);
   }
   async function aiAdd(query: string): Promise<{ explanation?: string }> {
     if (!config) return {};
-    const res = await api.smart(query);
+    const res = await api.smart(query); // AI parse stays a real request
     let nextModes = modes;
-    const upsertModes: ModeRecord[] = [];
     let intent: Intent = { ...res.intent, id: res.intent.id ?? crypto.randomUUID() };
     if (res.mode) {
       const rec: ModeRecord = { id: crypto.randomUUID(), name: res.mode.name, span: res.mode.span };
       nextModes = [...modes, rec];
-      upsertModes.push(rec);
       intent = { ...intent, mode: rec.id }; // link the intent to the new mode's id
     }
-    await guard(
-      publishState(config, [...intents, intent], nextModes, {
-        upsertIntents: [intent],
-        upsertModes: upsertModes.length ? upsertModes : undefined,
-      })
-    );
+    applyChange(config, [...intents, intent], nextModes);
     return { explanation: res.explanation };
   }
   async function rotateFeed() {
@@ -343,7 +409,7 @@ export function App() {
         modes={modes}
         onNewMode={() => setEditingMode({ mode: null })}
         onEditMode={(m) => setEditingMode({ mode: m })}
-        onDeleteMode={(id) => config && guard(publishState(config, intents, modes.filter((m) => m.id !== id), { deleteModeIds: [id] }))}
+        onDeleteMode={(id) => config && applyChange(config, intents, modes.filter((m) => m.id !== id))}
         feed={feed}
         onRotateFeed={rotateFeed}
         onReportBug={() => setBugOpen(true)}
@@ -351,6 +417,7 @@ export function App() {
         instanceCount={solveResp?.instances.length ?? 0}
         cached={solveResp?.cached ?? null}
         conflictCount={solveResp?.conflicts.length ?? 0}
+        saveStatus={saveStatus}
       />
 
       <div className="main">
@@ -454,6 +521,14 @@ export function App() {
         />
       ) : null}
     </div>
+    {toast ? (
+      <div className="toast toast-error" role="alert">
+        <span>{toast}</span>
+        <button className="toast-close" onClick={() => setToast(null)} aria-label="Dismiss">
+          ×
+        </button>
+      </div>
+    ) : null}
     <ThemeToggle theme={theme} onToggle={toggleTheme} />
     </>
   );

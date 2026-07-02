@@ -94,6 +94,28 @@ body { background: var(--bg); color: var(--ink); }
 .side-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; margin-bottom: 14px; }
 .side-head h1 { font-size: 18px; margin: 4px 0 2px; }
 .sidebar .tagline { color: var(--muted); font-size: 12px; margin: 0; }
+
+/* async-save status indicator (before the "N events · N conflicts" text) */
+.save-ind { display: inline-flex; align-items: center; gap: 5px; font-weight: 600; }
+.save-ind .save-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); flex: none; }
+.save-ind.saved { color: var(--muted); }
+.save-ind.saved .save-dot { background: #2ea043; }
+.save-ind.processing, .save-ind.saving { color: var(--accent); }
+.save-ind.processing .save-dot, .save-ind.saving .save-dot { background: var(--accent); animation: pulse 1s ease-in-out infinite; }
+.save-ind.error { color: var(--danger); }
+.save-ind.error .save-dot { background: var(--danger); }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+
+/* failure toast */
+.toast {
+  position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
+  display: flex; align-items: center; gap: 12px; max-width: min(90vw, 520px);
+  padding: 12px 14px; border-radius: 10px; font-size: 13px; z-index: 1000;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.25);
+}
+.toast-error { background: var(--danger-bg); color: var(--danger-ink); border: 1px solid var(--danger); }
+.toast-close { background: none; border: none; color: inherit; font-size: 18px; line-height: 1; cursor: pointer; padding: 0 2px; opacity: 0.7; }
+.toast-close:hover { opacity: 1; }
 .section { margin-bottom: 22px; }
 .sec-head {
   display: flex; align-items: center; gap: 6px; cursor: help;

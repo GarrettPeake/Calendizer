@@ -129,6 +129,34 @@ export async function updateIntent(db: D1Database, userId: string, id: string, i
     .run();
   return stored;
 }
+/** Replace a user's whole intent set atomically (the /publish full-state path). */
+export async function replaceIntents(db: D1Database, userId: string, intents: Intent[]): Promise<void> {
+  const ts = now();
+  const stmts = [db.prepare(`DELETE FROM intents WHERE user_id = ?`).bind(userId)];
+  for (const it of intents) {
+    const id = it.id ?? crypto.randomUUID();
+    stmts.push(
+      db
+        .prepare(`INSERT INTO intents (id, user_id, json, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`)
+        .bind(id, userId, JSON.stringify({ ...it, id }), ts, ts)
+    );
+  }
+  await db.batch(stmts);
+}
+
+/** Replace a user's whole mode set atomically (the /publish full-state path). */
+export async function replaceModes(db: D1Database, userId: string, modes: ModeRecord[]): Promise<void> {
+  const stmts = [db.prepare(`DELETE FROM modes WHERE user_id = ?`).bind(userId)];
+  for (const m of modes) {
+    stmts.push(
+      db
+        .prepare(`INSERT INTO modes (id, user_id, name, start_date, end_date) VALUES (?, ?, ?, ?, ?)`)
+        .bind(m.id ?? crypto.randomUUID(), userId, m.name, m.span[0], m.span[1])
+    );
+  }
+  await db.batch(stmts);
+}
+
 /** Create-or-update an intent by id (the atomic /publish path). Returns the stored intent. */
 export async function upsertIntent(db: D1Database, userId: string, intent: Intent): Promise<Intent> {
   const id = intent.id ?? crypto.randomUUID();

@@ -117,56 +117,44 @@ app.get('/api/calendar', requireAuth, async (c) => {
 });
 
 interface PublishBody {
-  mutations?: {
-    config?: GlobalConfig;
-    upsertIntents?: Intent[];
-    deleteIntentIds?: string[];
-    upsertModes?: (Mode & { id?: string })[];
-    deleteModeIds?: string[];
-  };
+  state: { config: GlobalConfig; intents: Intent[]; modes: (Mode & { id: string })[] };
   calendar: CalendarPayload;
 }
 
-// Atomic save: apply input mutations AND store the client-recomputed calendar in
-// ONE request, so intents/config/modes and the published calendar can't diverge.
+// Atomic save: replace the full input state (config/intents/modes) AND store the
+// client-recomputed calendar in ONE request, so the inputs and the published
+// calendar can't diverge. Full-state (not deltas) so rapid client edits coalesce
+// to "latest wins" with no merge logic.
 app.post('/api/publish', requireAuth, async (c) => {
   const userId = c.get('userId');
   const body = (await c.req.json().catch(() => ({}))) as PublishBody;
   const cal = body.calendar;
+  const state = body.state;
   if (!cal || !Array.isArray(cal.instances) || !cal.horizon) {
     return c.json({ error: 'A calendar (instances + horizon) is required' }, 400);
   }
-  const m = body.mutations ?? {};
+  if (!state || !state.config || !Array.isArray(state.intents) || !Array.isArray(state.modes)) {
+    return c.json({ error: 'state (config + intents + modes) is required' }, 400);
+  }
 
-  // --- Validate everything against the POST-mutation effective state; reject all-or-nothing.
-  const config = m.config ?? (await repo.getConfig(c.env.DB, userId));
-  if (m.config) {
-    const e = firstError(validateConfig(m.config));
+  // --- Validate the full state; reject all-or-nothing.
+  const ce = firstError(validateConfig(state.config));
+  if (ce) return c.json({ error: ce }, 400);
+  for (const md of state.modes) {
+    const e = firstError(validateMode(md, { others: state.modes.filter((o) => o.id !== md.id) }));
     if (e) return c.json({ error: e }, 400);
   }
-  const storedModes = await repo.listModes(c.env.DB, userId);
-  const deleteModeIds = new Set(m.deleteModeIds ?? []);
-  const effModes = [
-    ...storedModes.filter((x) => !deleteModeIds.has(x.id)).map((x) => ({ id: x.id, name: x.name, span: x.span })),
-    ...(m.upsertModes ?? []).map((md) => ({ id: md.id ?? '', name: md.name, span: md.span })),
-  ];
-  for (const md of m.upsertModes ?? []) {
-    const e = firstError(validateMode(md, { others: effModes.filter((o) => o.id !== (md.id ?? '')) }));
-    if (e) return c.json({ error: e }, 400);
-  }
-  for (const it of m.upsertIntents ?? []) {
-    const e = firstError(validateIntent(it, { config, modes: effModes }));
+  for (const it of state.intents) {
+    const e = firstError(validateIntent(it, { config: state.config, modes: state.modes }));
     if (e) return c.json({ error: e }, 400);
   }
 
-  // --- Apply mutations, then store the calendar (freeze + overlay + render ICS).
-  if (m.config) await repo.setConfig(c.env.DB, userId, m.config);
-  for (const md of m.upsertModes ?? []) await repo.upsertMode(c.env.DB, userId, md.id ?? crypto.randomUUID(), md);
-  for (const id of m.deleteModeIds ?? []) await repo.deleteMode(c.env.DB, userId, id);
-  for (const it of m.upsertIntents ?? []) await repo.upsertIntent(c.env.DB, userId, it);
-  for (const id of m.deleteIntentIds ?? []) await repo.deleteIntent(c.env.DB, userId, id);
+  // --- Replace inputs wholesale, then store the calendar (freeze + overlay + render ICS).
+  await repo.setConfig(c.env.DB, userId, state.config);
+  await repo.replaceModes(c.env.DB, userId, state.modes);
+  await repo.replaceIntents(c.env.DB, userId, state.intents);
 
-  const result = await storeCalendar(c.env.DB, userId, config, cal);
+  const result = await storeCalendar(c.env.DB, userId, state.config, cal);
   return c.json({
     instances: result.instances,
     conflicts: result.conflicts,

@@ -32,7 +32,15 @@ interface Props {
   instanceCount: number;
   cached: boolean | null;
   conflictCount: number;
+  saveStatus: 'saved' | 'processing' | 'saving' | 'error';
 }
+
+const SAVE_LABEL: Record<Props['saveStatus'], string> = {
+  processing: 'Processing…',
+  saving: 'Saving…',
+  saved: 'Saved',
+  error: 'Save failed',
+};
 
 export function Sidebar(p: Props) {
   // Intents reference a mode by id; show its current name in the summary.
@@ -47,6 +55,11 @@ export function Sidebar(p: Props) {
         <div>
           <h1>Calendizer</h1>
           <p className="tagline">
+            <span className={`save-ind ${p.saveStatus}`} title={SAVE_LABEL[p.saveStatus]}>
+              <span className="save-dot" />
+              {SAVE_LABEL[p.saveStatus]}
+            </span>
+            {' · '}
             {p.instanceCount} events · {p.conflictCount} conflict{p.conflictCount === 1 ? '' : 's'}
           </p>
         </div>

@@ -23,12 +23,11 @@ export interface StoredCalendar {
   computedAt: string | null;
   cached: boolean;
 }
-export interface PublishMutations {
-  config?: GlobalConfig;
-  upsertIntents?: Intent[];
-  deleteIntentIds?: string[];
-  upsertModes?: ModeRecord[];
-  deleteModeIds?: string[];
+/** The full desired input state — publish replaces the stored set wholesale. */
+export interface PublishState {
+  config: GlobalConfig;
+  intents: Intent[];
+  modes: ModeRecord[];
 }
 export interface CalendarPayload {
   instances: Instance[];
@@ -105,9 +104,9 @@ export const api = {
   listModes: () => req<ModeRecord[]>('GET', '/modes'),
   getCalendar: () => req<StoredCalendar>('GET', '/calendar'),
 
-  // atomic write: input mutations + the client-recomputed calendar in one request
-  publish: (mutations: PublishMutations, calendar: CalendarPayload) =>
-    req<SolveResponse>('POST', '/publish', { mutations, calendar }),
+  // atomic write: the full input state + the client-recomputed calendar in one request
+  publish: (state: PublishState, calendar: CalendarPayload) =>
+    req<SolveResponse>('POST', '/publish', { state, calendar }),
 
   // smart — parse only; the client adds the result to state and publishes
   smart: (query: string) =>
