@@ -18,6 +18,17 @@ const inst = (over: Partial<Instance> = {}): Instance => ({
   ...over,
 });
 
+test('blocker instances are excluded from the feed entirely', () => {
+  const ics = renderICS(
+    [inst({ uid: 'w|1', intentId: 'work', subject: 'Work', blocker: true }), inst()],
+    'Calendizer',
+    -420
+  );
+  assert.ok(!ics.includes('SUMMARY:Work'));
+  assert.ok(!ics.includes('w|1'));
+  assert.ok(ics.includes('SUMMARY:Night routine')); // the real event still publishes
+});
+
 test('with an offset: emits a fixed-offset VTIMEZONE and TZID-tagged times (not floating)', () => {
   const ics = renderICS([inst()], 'Calendizer', -420);
   assert.match(ics, /BEGIN:VTIMEZONE/);

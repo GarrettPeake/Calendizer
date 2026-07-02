@@ -44,6 +44,7 @@ import { resolveWindow, resolveSleepBlackout } from './markers';
 import { detectModeOverlaps } from './modes';
 import { expandIntent, Slot, slugify } from './expand';
 import { tileChildren } from './children';
+import { applyBlockerSemantics } from './blockers';
 
 export interface Occupied {
   startAbs: number;
@@ -249,14 +250,18 @@ export function greedyPlacements(input: SolveInput): Construction {
 
 /** Assemble the public SolveOutput from a final arrangement. */
 export function assembleOutput(c: Construction, input: SolveInput): SolveOutput {
-  const conflicts = c.conflicts.slice();
+  const rawConflicts = c.conflicts.slice();
 
   // --- Conflict report: name only the overlaps that actually remain, in the
   // same priority order they were placed (pinned first). ---
-  conflicts.push(...overlapConflicts(c.placements, c.fixedOccupied, c.origin));
+  rawConflicts.push(...overlapConflicts(c.placements, c.fixedOccupied, c.origin));
 
-  const instances: Instance[] = c.placements.map((p) => buildInstance(p, input.config));
-  instances.sort((a, b) => (a.start < b.start ? -1 : a.start > b.start ? 1 : a.subject.localeCompare(b.subject)));
+  const built: Instance[] = c.placements.map((p) => buildInstance(p, input.config));
+  built.sort((a, b) => (a.start < b.start ? -1 : a.start > b.start ? 1 : a.subject.localeCompare(b.subject)));
+
+  // Blockers reserve time but aren't events: mark their instances, label what
+  // they overlap, and absorb the overlap conflicts they're involved in.
+  const { instances, conflicts } = applyBlockerSemantics(built, rawConflicts, input.intents);
 
   const updates = diffUpdates(instances, input.existingCalendar ?? []);
 

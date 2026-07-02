@@ -250,7 +250,19 @@ label.field span { display: block; margin-bottom: 3px; }
 .evt .time { font-size: 9.5px; opacity: 0.8; }
 .evt .kids { margin-top: 2px; font-size: 9.5px; opacity: 0.85; }
 .evt.fixed { background: var(--surface-2); border-left-color: var(--muted); color: var(--ink); }
+/* An event forced to share time with a blocker: flagged softly (orange), never
+   as loudly as a real overlap — declared BEFORE .evt.overlap so red wins. */
+.evt.blocked { outline: 2px solid var(--warn); outline-offset: -2px; }
 .evt.overlap { outline: 2px solid var(--danger); outline-offset: -2px; }
+
+/* A blocker occurrence: a tinted zone behind the events, not an event. */
+.blocker-zone {
+  position: absolute;
+  left: 0;
+  right: 0;
+  z-index: 1;
+  border-radius: 2px;
+}
 /* Elapsed (frozen) occurrences read as settled history, not planned. */
 .evt.past { opacity: 0.5; box-shadow: none; }
 
@@ -260,6 +272,14 @@ label.field span { display: block; margin-bottom: 3px; }
   letter-spacing: 0.04em; padding: 0 4px; border-radius: 999px;
   background: color-mix(in srgb, var(--accent) 22%, transparent); color: var(--ink);
   border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent); margin-right: 4px;
+}
+
+/* "overlaps a blocker" marker — same shape as the sleep tag, warn-toned */
+.blocker-tag {
+  display: inline-block; font-size: 8.5px; line-height: 1.4; text-transform: uppercase;
+  letter-spacing: 0.04em; padding: 0 4px; border-radius: 999px;
+  background: color-mix(in srgb, var(--warn) 22%, transparent); color: var(--ink);
+  border: 1px solid color-mix(in srgb, var(--warn) 45%, transparent); margin-right: 4px;
 }
 
 /* ---------------- Theme toggle ---------------- */

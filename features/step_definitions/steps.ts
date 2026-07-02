@@ -352,6 +352,22 @@ Then('no occurrence is marked as placed during sleep', function (this: Calendize
   assert.equal(bad.length, 0, `placed during sleep: ${bad.map((i) => i.subject + '@' + i.start).join(', ')}`);
 });
 
+/* -------------------------------- Blockers -------------------------------- */
+
+Then('the occurrence of {string} on {string} is a blocker', function (this: CalendizerWorld, subject: string, date: string) {
+  assert.equal(this.oneOn(subject, date).blocker, true, 'expected blocker mark');
+});
+
+Then('the occurrence of {string} on {string} is blocked by {string}', function (this: CalendizerWorld, subject: string, date: string, blocker: string) {
+  const inst = this.oneOn(subject, date);
+  assert.ok(inst.blockedBy?.includes(blocker), `expected blockedBy to include "${blocker}", got ${JSON.stringify(inst.blockedBy)}`);
+});
+
+Then('the occurrence of {string} on {string} is not marked blocked', function (this: CalendizerWorld, subject: string, date: string) {
+  const inst = this.oneOn(subject, date);
+  assert.equal(inst.blockedBy, undefined, `unexpected blockedBy: ${JSON.stringify(inst.blockedBy)}`);
+});
+
 /* -------------------------------- Conflicts -------------------------------- */
 
 Then('there are no conflicts', function (this: CalendizerWorld) {

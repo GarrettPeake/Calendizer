@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import type { CalendarEvent, Instance, TimeValue } from 'calendizer';
-import { colorFor, modeColor } from '../lib/colors';
+import { blockerColor, colorFor, modeColor } from '../lib/colors';
 import { dateOf, dayLabel, timeOfMin, weekdayCode } from '../lib/dates';
 
 const HOUR_H = 48; // px per hour
@@ -45,6 +45,7 @@ interface DisplayEvent {
   intentId?: string;
   children?: { subject: string; start: string; end: string }[];
   placedDuringSleep?: boolean;
+  blockedBy?: string[];
   _lane?: number;
   _lanes?: number;
   _overlap?: boolean;
@@ -137,6 +138,25 @@ export function WeekCalendar(props: {
 
   const bands = useMemo(() => sleepBands(clockMin(props.wakeup), clockMin(props.sleep)), [props.wakeup, props.sleep]);
 
+  // Blocker instances are drawn as tinted ZONES, not events: they take no lane,
+  // never push real events sideways, and stay behind them.
+  const zonesByDay = useMemo(() => {
+    const map: Record<string, { uid: string; subject: string; intentId: string; startMin: number; endMin: number }[]> =
+      {};
+    for (const d of days) map[d] = [];
+    for (const inst of instances) {
+      if (!inst.blocker || !dayset.has(inst.date)) continue;
+      map[inst.date].push({
+        uid: inst.uid,
+        subject: inst.subject,
+        intentId: inst.intentId,
+        startMin: timeOfMin(inst.start),
+        endMin: timeOfMin(inst.end),
+      });
+    }
+    return map;
+  }, [days, instances]);
+
   const byDay = useMemo(() => {
     const map: Record<string, DisplayEvent[]> = {};
     for (const d of days) map[d] = [];
@@ -154,7 +174,7 @@ export function WeekCalendar(props: {
     }
     for (const inst of instances) {
       const d = inst.date;
-      if (!dayset.has(d)) continue;
+      if (!dayset.has(d) || inst.blocker) continue;
       map[d].push({
         uid: inst.uid,
         subject: inst.subject,
@@ -165,6 +185,7 @@ export function WeekCalendar(props: {
         intentId: inst.intentId,
         children: inst.children,
         placedDuringSleep: inst.placedDuringSleep,
+        blockedBy: inst.blockedBy,
       });
     }
     for (const d of days) map[d] = layoutDay(map[d]);
@@ -229,6 +250,17 @@ export function WeekCalendar(props: {
                   style={{ top: s * PX, height: (e - s) * PX }}
                 />
               ))}
+              {zonesByDay[d].map((z) => {
+                const zc = blockerColor(z.intentId);
+                return (
+                  <div
+                    key={z.uid}
+                    className="blocker-zone"
+                    style={{ top: z.startMin * PX, height: (z.endMin - z.startMin) * PX, background: zc.wash, borderLeft: `3px solid ${zc.edge}` }}
+                    title={`${z.subject} (blocker)\n${fmt(z.startMin)}–${fmt(z.endMin)}`}
+                  />
+                );
+              })}
               {hours.map((h) => (
                 <div className="hr-line" key={h} />
               ))}
@@ -253,7 +285,7 @@ export function WeekCalendar(props: {
                 return (
                   <div
                     key={e.uid}
-                    className={`evt ${e.kind}${e._overlap ? ' overlap' : ''}${past ? ' past' : ''}`}
+                    className={`evt ${e.kind}${e.blockedBy?.length ? ' blocked' : ''}${e._overlap ? ' overlap' : ''}${past ? ' past' : ''}`}
                     style={style}
                     title={`${e.subject}\n${fmt(e.startMin)}–${fmt(e.endMin)}${
                       e.children?.length ? '\n' + e.children.map((c) => `• ${c.subject}`).join('\n') : ''
@@ -261,6 +293,9 @@ export function WeekCalendar(props: {
                   >
                     <div className="t">
                       {e.placedDuringSleep ? <span className="sleep-tag">sleep</span> : null}
+                      {e.blockedBy?.map((b) => (
+                        <span key={b} className="blocker-tag">{b}</span>
+                      ))}
                       {e.subject}
                     </div>
                     <div className="time">

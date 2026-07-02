@@ -245,6 +245,22 @@ export function IntentEditor(props: {
             </div>
             {maxHint ? <div className="hint-cell">Max duration: {maxHint}</div> : null}
             <FieldMsgs result={v} field="duration" />
+            <Field label="">
+              <label className="chk">
+                <input
+                  type="checkbox"
+                  checked={!!d.blocker}
+                  onChange={(e) => patch({ blocker: e.target.checked || undefined })}
+                />
+                Blocker
+              </label>
+            </Field>
+            {d.blocker ? (
+              <div className="hint-cell">
+                Reserves the time — everything else schedules around it — but it isn't an event:
+                it shows as a shaded area and never appears in your calendar feed.
+              </div>
+            ) : null}
           </Group>
 
           {/* Window */}

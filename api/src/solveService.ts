@@ -8,7 +8,7 @@
  * authoritative frozen past so a stale/buggy client can't rewrite history), and
  * (3) runs a full server-side solve only as the stale-feed fallback.
  */
-import { renderICS, overlay, realizedConflicts, assembleSchedule } from '../../src/index';
+import { renderICS, overlay, realizedConflicts, assembleSchedule, applyBlockerSemantics } from '../../src/index';
 import { addDays, localNow } from '../../src/time';
 import type { Instance, ConflictReport, GlobalConfig } from '../../src/index';
 import {
@@ -104,8 +104,12 @@ export async function storeCalendar(
   await freezeInstances(db, userId, cal.instances.filter((i) => i.start < nowDT));
   await pruneFrozen(db, userId, retentionStart);
   const frozen = await listFrozen(db, userId, retentionStart);
-  const instances = overlay(frozen, cal.instances, nowDT);
-  const conflicts = realizedConflicts(cal.conflicts, instances, today);
+  const merged = overlay(frozen, cal.instances, nowDT);
+  const realized = realizedConflicts(cal.conflicts, merged, today);
+  // The frozen table stores no derived fields — re-derive blocker marks from
+  // the intent set so past blocker occurrences stay out of the ICS too.
+  const intents = await listIntents(db, userId);
+  const { instances, conflicts } = applyBlockerSemantics(merged, realized, intents);
   const ics = renderICS(instances, 'Calendizer', config.utcOffsetMinutes, config.subtasksAsEvents);
   const computedAt = cal.computedAt ?? new Date().toISOString();
   const solveMs = cal.solveMs ?? 0;

@@ -14,6 +14,7 @@
 import { GlobalConfig, Intent, Mode, Instance, CalendarEvent, ConflictReport } from './types';
 import { ISODate, ISODateTime, addDays, startOfISOWeek } from './time';
 import { alignHorizonStart, overlay, realizedConflicts, isFullyPassed } from './temporal';
+import { applyBlockerSemantics } from './blockers';
 import { resolveModeName } from './modes';
 import { Solver, greedySolver } from './solver';
 
@@ -102,8 +103,11 @@ export function assembleSchedule(input: AssembleInput): AssembleResult {
 
   // Overlay: immutable frozen past over projected past (past projections drop),
   // then keep only conflicts that survive as a real overlap in the output.
-  const instances = overlay(frozen, out.instances, nowDT);
-  const conflicts = realizedConflicts(out.conflicts, instances, today);
+  const merged = overlay(frozen, out.instances, nowDT);
+  const realized = realizedConflicts(out.conflicts, merged, today);
+  // Frozen rows come back from storage without derived fields — re-derive the
+  // blocker marks for the whole set (idempotent for the freshly solved future).
+  const { instances, conflicts } = applyBlockerSemantics(merged, realized, resolvedIntents);
 
   return {
     instances,

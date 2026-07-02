@@ -5,3 +5,4 @@ dist/
 .env.local
 .dev.vars
 .wrangler/
+.playwright-cli/

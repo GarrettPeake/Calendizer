@@ -40,6 +40,27 @@ const dailyIntent = (over: Partial<Intent> = {}): Intent => ({
   ...over,
 });
 
+test('frozen instances of a blocker are re-marked (storage drops derived fields)', () => {
+  const work = dailyIntent({ id: 'work', subject: 'Work', blocker: true, duration: [480, 480], window: { starts_at: '09:00' } });
+  // A frozen (already elapsed) occurrence, as it comes back from the D1 table:
+  // no `blocker` flag — the pipeline must re-derive it from the intent set.
+  const frozen: Instance[] = [
+    {
+      uid: 'work|day:2026-06-30|0',
+      intentId: 'work',
+      subject: 'Work',
+      date: '2026-06-30',
+      start: '2026-06-30T09:00',
+      end: '2026-06-30T17:00',
+      durationMin: 480,
+    },
+  ];
+  const r = assembleSchedule(base({ intents: [work], frozen }));
+  const past = r.instances.find((i) => i.uid === 'work|day:2026-06-30|0');
+  assert.equal(past?.blocker, true);
+  assert.ok(r.instances.filter((i) => i.intentId === 'work').every((i) => i.blocker));
+});
+
 test('a live daily intent produces future occurrences and no reaping', () => {
   const r = assembleSchedule(base({ intents: [dailyIntent()] }));
   assert.ok(r.instances.length > 0);

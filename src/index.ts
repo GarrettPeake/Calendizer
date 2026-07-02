@@ -13,6 +13,7 @@ export { createMilpSolver } from './milp/milpSolver';
 export type { MilpDebugSink, MilpMemo } from './milp/milpSolver';
 export type { HighsInstance } from './milp/stages';
 export { renderICS } from './ics';
+export { applyBlockerSemantics } from './blockers';
 export { resolveTimeValue, resolveWindow } from './markers';
 export { solarTimes } from './solar';
 export { expandIntent } from './expand';

@@ -476,6 +476,7 @@ export function App() {
           <div className="legend">
             <span><span className="sleep-tag">sleep</span> During sleep hours</span>
             <span><span className="swatch" style={{ background: 'transparent', outline: '2px solid var(--danger)' }} />Overlap</span>
+            <span><span className="swatch" style={{ background: 'transparent', outline: '2px solid var(--warn)' }} />Blocked</span>
           </div>
         </div>
 

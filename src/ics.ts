@@ -118,6 +118,9 @@ export function renderICS(
     );
   }
   for (const inst of instances) {
+    // Blockers reserve time on the planner but are never published: the whole
+    // point is NOT putting a big "Work" block on top of real work meetings.
+    if (inst.blocker) continue;
     const hasChildren = !!(inst.children && inst.children.length > 0);
     lines.push('BEGIN:VEVENT');
     lines.push(`UID:${inst.uid}`);

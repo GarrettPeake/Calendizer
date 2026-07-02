@@ -14,6 +14,16 @@ export function colorFor(key: string): { bg: string; border: string; text: strin
   };
 }
 
+// A blocker's zone: a translucent tint over its time span — enough to read as
+// "occupied", faint enough that events drawn over it stay legible.
+export function blockerColor(key: string): { wash: string; edge: string } {
+  const hue = hueOf(key);
+  return {
+    wash: `hsl(${hue} 65% 50% / 0.14)`,
+    edge: `hsl(${hue} 60% 50% / 0.55)`,
+  };
+}
+
 // A mode's palette: a faint full-column wash for the calendar, plus a saturated
 // chip/dot color and a readable text tone for labels. Derived from the mode id so
 // renaming a mode keeps its color.

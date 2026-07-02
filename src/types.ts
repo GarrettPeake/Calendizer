@@ -74,6 +74,13 @@ export interface Intent {
   window: Window;
   children?: Child[];
   cardinality: Cardinality;
+  /**
+   * A blocker reserves time like any intent — everything schedules around it at
+   * full priority — but its occurrences are scenery, not events: drawn as a
+   * shaded area, excluded from the ICS feed, and an event forced to overlap one
+   * is labeled (`Instance.blockedBy`) rather than reported as a conflict.
+   */
+  blocker?: boolean;
   /** Optional stable id; defaults to a slug of the subject. */
   id?: string;
 }
@@ -155,6 +162,10 @@ export interface Instance {
   children?: SubInstance[];
   /** True when sleep blackout was dropped to place this (allowed, no conflict). */
   placedDuringSleep?: boolean;
+  /** Produced by a blocker intent: shaded area on the calendar, absent from ICS. */
+  blocker?: boolean;
+  /** Subjects of blocker instances this event overlaps (labeled, not a conflict). */
+  blockedBy?: string[];
 }
 
 export type UpdateKind = 'create' | 'update' | 'delete' | 'unchanged';

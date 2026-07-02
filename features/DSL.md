@@ -64,6 +64,7 @@ read it. Shape:
     "per_day": { "count": [1, 1] },
     "total": [2, null]                              // lifetime [min,max]; null = open
   },
+  "blocker": false,                // true ⇒ reserves time but is NOT an event (see §2 Blockers)
   "id": "optional-stable-id"       // defaults to slug of subject
 }
 ```
@@ -127,6 +128,14 @@ sleep window is removed from an intent's legal window **only while that leaves r
 if the only legal slot is inside sleep (e.g. a `starts_at: "03:00"` with `wakeup`
 later), the event is placed there, marked "placed during sleep", and **no conflict**
 is raised. Normal daytime events are **not** marked placed-during-sleep.
+
+**Blockers.** An intent with `"blocker": true` is placed exactly like any other
+(same priority, windows, cardinality — everything schedules around it), but its
+occurrences are marked `blocker` and are scenery, not events: they are excluded
+from the ICS feed, and an event forced to overlap one gets `blockedBy: ["<blocker
+subject>"]` instead of an `overlap` conflict. Only overlap conflicts involving a
+blocker are absorbed — a blocker that is itself unplaceable still raises
+`window-unsatisfiable`/`floor-unmet` as usual.
 
 **Modes.**
 - During a mode span: active = intents with `mode` == that mode's name **or** `"all"`;
@@ -230,6 +239,13 @@ Then the child "shower" of "morning routine" on "2026-07-06" lasts 10 minutes
 ```
 Then the occurrence of "fishing" on "2026-07-11" is placed during sleep
 Then no occurrence is marked as placed during sleep
+```
+
+### Blockers
+```
+Then the occurrence of "Work" on "2026-07-06" is a blocker
+Then the occurrence of "standup call" on "2026-07-06" is blocked by "Work"
+Then the occurrence of "errand" on "2026-07-06" is not marked blocked
 ```
 
 ### Conflicts
