@@ -176,6 +176,35 @@ test('same-intent occurrences never share a day (the "two Park times on Saturday
   assert.equal(overlapMinutes(m.instances), 0);
 });
 
+test('a floor that cannot fit the clean days conflicts honestly — never doubles', () => {
+  const cfg: GlobalConfig = { ...CONFIG, wakeup: '08:00', sleep: '23:30', fillToMax: true, utcOffsetMinutes: -420 };
+  // Work covers Park's whole window on weekdays; the floor of 3 has only two
+  // clean days (Sat+Sun). Doubling outranks overlap: the third occurrence must
+  // land on a THIRD day and surface its forced overlap as a conflict.
+  const intents = [
+    intent('Work', {
+      priority: 95,
+      duration: [480, 480],
+      window: { starts_at: '09:00' },
+      cardinality: { period: { unit: 'day' }, days: { weekdays: ['MO', 'TU', 'WE', 'TH', 'FR'] } },
+      id: 'work',
+    }),
+    intent('Park time', {
+      priority: 55,
+      duration: [45, 75],
+      window: { not_before: '11:30', not_after: '15:00' },
+      cardinality: { period: { unit: 'week' }, days: { count: [3, 4] } },
+      id: 'park',
+    }),
+  ];
+  const m = createMilpSolver(highs).solve(inputOf(intents, cfg));
+  const parks = m.instances.filter((i) => i.subject === 'Park time');
+  const days = parks.map((i) => i.date);
+  assert.equal(parks.length, 3); // floors always place
+  assert.equal(new Set(days).size, 3, `doubled: ${days.join(',')}`);
+  assert.ok(m.conflicts.some((c) => c.involved.includes('Park time') && c.involved.includes('Work')));
+});
+
 test('duration growth: milp fills toward max at least as well as greedy', () => {
   const cfg: GlobalConfig = { ...CONFIG, fillToMax: true };
   const intents = [

@@ -636,43 +636,34 @@ export function buildWeekModel(input: BuildInput): WeekModel {
 
       const xv = `xv_${slug(intentId)}_${xvN++}`;
       const w = (occ[indices[0]].item.intent.priority ?? 0) + 1;
-      let used = false;
-      let xvSeed = 0;
 
-      // At most one mobile non-stack occurrence on d.
-      if (mobileOthers.length > 1) {
+      // CARDINALITY rows: xv counts the EXCESS residents on d, so every extra
+      // co-resident costs at least one more unit (a shared "was violated at
+      // all" slack priced 2-on-a-day the same as 3-on-a-day — the optionals
+      // tier then piled on for free). Fixed residents fold in as constants;
+      // the per_day stack counts as one group via a row per stack member.
+      const fixedResidents =
+        others.filter((oi) => isFixed(oi)).length + entries.filter((oi) => isSib(oi) && isFixed(oi) && occ[oi].days[0] === d).length;
+      const moversLin = () => {
         const lin = new Lin();
         for (const oi of mobileOthers) lin.add(1, presOf(oi));
         lin.add(-1, xv);
-        constraints.push(`xm_${slug(intentId)}_${dTag}: ${lin.cmp('<=', 1)}`);
-        used = true;
-        xvSeed = Math.max(xvSeed, mobileOthers.filter(presentAtSeed).length - 1);
-      }
-      for (const mo of mobileOthers) {
-        if (anyFixedResident) {
-          // Someone (spilled sibling or stack) is fixed on d — joining costs xv.
-          constraints.push(`xf_${slug(intentId)}_${dTag}_${mo}: ${new Lin().add(1, presOf(mo)).add(-1, xv).cmp('<=', 0)}`);
-          used = true;
-          if (presentAtSeed(mo)) xvSeed = Math.max(xvSeed, 1);
-          continue;
-        }
-        // Mutually exclusive with each (mobile) stack member.
-        for (const s of mobileSibs) {
-          constraints.push(
-            `xn_${slug(intentId)}_${dTag}_${mo}_${s}: ${new Lin().add(1, presOf(mo)).add(1, presOf(s)).add(-1, xv).cmp('<=', 1)}`
-          );
-          used = true;
-          if (presentAtSeed(mo) && presentAtSeed(s)) xvSeed = Math.max(xvSeed, 1);
-        }
-      }
-      if (used) {
-        bounds.push(`0 <= ${xv} <= ${entries.length}`);
-        generals.push(xv);
-        dblTerms.set(xv, w);
-        seedValues.set(xv, xvSeed);
+        return lin;
+      };
+      const moversSeed = mobileOthers.filter(presentAtSeed).length;
+      let xvSeed = Math.max(0, moversSeed + fixedResidents - 1);
+      if (mobileSibs.length === 0) {
+        constraints.push(`xd_${slug(intentId)}_${dTag}: ${moversLin().cmp('<=', 1 - fixedResidents)}`);
       } else {
-        xvN--;
+        for (const sib of mobileSibs) {
+          constraints.push(`xd_${slug(intentId)}_${dTag}_${sib}: ${moversLin().add(1, presOf(sib)).cmp('<=', 1 - fixedResidents)}`);
+          if (presentAtSeed(sib)) xvSeed = Math.max(xvSeed, moversSeed + fixedResidents + 1 - 1);
+        }
       }
+      bounds.push(`0 <= ${xv} <= ${entries.length}`);
+      generals.push(xv);
+      dblTerms.set(xv, w);
+      seedValues.set(xv, xvSeed);
     }
   }
 
@@ -722,10 +713,21 @@ export function buildWeekModel(input: BuildInput): WeekModel {
   const stages: StageObjective[] = (
     phase === 'week'
       ? [
-          { name: 'overlap', terms: ovTerms, ideal: 0 },
-          // Same-intent day doubling — a correctness rule, so it outranks
-          // everything below overlap (dropping an extra beats doubling a day).
+          // Same-intent day doubling outranks EVERYTHING, overlap included:
+          // occurrences of one intent spread across distinct days is the
+          // contract, and when the floor genuinely doesn't fit the clean days
+          // the honest outcome is a visible overlap conflict — never a
+          // silently doubled day ("they'd have to conflict with Work
+          // otherwise" is a feature, not a bug).
           { name: 'daydouble', terms: dblTerms, ideal: 0 },
+          // Bounded like durations: when the week's overlap optimum is ZERO
+          // (the norm) the incumbent matches the bound instantly and the cap
+          // never bites; when overlap is structurally forced (e.g. a floor
+          // that can't fit the clean days), proving the exact nonzero minimum
+          // costs seconds per week for immaterial minutes — stop at the 6th
+          // improving incumbent instead. The never-worse-than-seed guard
+          // still floors the result at greedy quality.
+          { name: 'overlap', terms: ovTerms, ideal: 0, options: PACKING_OPTIONS },
           { name: 'sleep', terms: sleepTerms, ideal: 0 },
           { name: 'padding', terms: psTerms, ideal: 0 },
           // Placement of aspirational extras is a maximization with the same

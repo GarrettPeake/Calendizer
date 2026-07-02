@@ -25,10 +25,12 @@ import {
   Construction,
   Item,
   Placement,
+  Occupied,
   greedyPlacements,
   assembleOutput,
   isInSleep,
   occFor,
+  repair,
 } from '../solver';
 import { GlobalConfig, SolveInput, SolveOutput } from '../types';
 import { ISODate, isoWeekKey, absoluteMinutes, startOfISOWeek, addDays, weekdayCode } from '../time';
@@ -43,15 +45,20 @@ export interface MilpDebugSink {
   onWeek?(weekKey: string, info: { skipped: boolean; fallback?: boolean; memo?: boolean; trace?: StageTrace[] }): void;
 }
 
-export function createMilpSolver(highs: HighsInstance, debug?: MilpDebugSink): Solver {
-  // Model-content-addressed memo, persistent ACROSS solves on this instance:
-  // an edit re-solves only the weeks whose models actually changed; every
-  // untouched week is a cache hit. Safe because the key is the full model.
-  const memo = new Map<string, Map<string, number> | null>();
+/** The solver's model-solution memo: full model text → solved var values. */
+export type MilpMemo = Map<string, Map<string, number> | null>;
+
+export function createMilpSolver(highs: HighsInstance, debug?: MilpDebugSink, memo?: MilpMemo): Solver {
+  // Model-content-addressed memo, persistent ACROSS solves on this instance
+  // (and, when the caller supplies and persists the Map — e.g. the web worker
+  // via IndexedDB — across page loads): an edit or reload re-solves only the
+  // weeks whose models actually changed. Safe because the key is the FULL
+  // model text: identical key ⇒ identical model ⇒ identical solution.
+  const memoMap: MilpMemo = memo ?? new Map();
   return {
     solve(input: SolveInput): SolveOutput {
       const c = greedyPlacements(input);
-      solveWeeks(highs, c, input, memo, debug);
+      solveWeeks(highs, c, input, memoMap, debug);
       return assembleOutput(c, input);
     },
   };
@@ -68,6 +75,7 @@ function solveWeeks(
   debug?: MilpDebugSink
 ): void {
   const config = input.config;
+  const today = input.today ?? '0000-00-00'; // no `today` ⇒ every day is visible
   const placedByUid = new Map<string, Placement>(c.placements.map((p) => [p.slot.uid, p]));
   const droppedUids = new Set(c.dropped.map((i) => i.slot.uid));
 
@@ -118,18 +126,33 @@ function solveWeeks(
   // costs one hard solve plus cheap verifications, and habits stay put.
   const template = new Map<string, { weekday: number; startMin: number; durationMin: number } | null>();
   const templateKey = (item: Item, weekday: number) => `${item.slot.intentId}|${item.slot.perDayIndex}|${weekday}`;
+  // The quality the template week actually achieved — a translation must match
+  // it (not merely beat the greedy seed, whose doubled days lose at tier 0 to
+  // almost anything) or the week solves fresh.
+  let templateScore: number[] | null = null;
 
   for (const wk of weekKeys) {
     const items = weeks.get(wk)!;
-    const adoption = tryAdoptTemplate(items, template, templateKey, placedByUid, c, config);
-    const seed = analyzeWeek(items, placedByUid, droppedUids, c, config, adoption);
+    const adoption = tryAdoptTemplate(items, template, templateKey, templateScore, placedByUid, c, config);
     const recordTemplate = () => {
       for (const item of items) {
         const p = placedByUid.get(item.slot.uid);
         const wd = isoWeekday(item.slot.date);
         template.set(templateKey(item, wd), p ? { weekday: isoWeekday(p.date), startMin: p.startMin, durationMin: p.durationMin } : null);
       }
+      templateScore = scoreWeekArrangement(items, placedByUid, c, config);
     };
+    // An adopted week inherited a fully-solved arrangement (validated legal
+    // and lexicographically no worse than the greedy seed, doubling first) —
+    // nothing left to solve, even when it carries a structurally-forced
+    // overlap that would otherwise re-trigger a solve every single week.
+    if (adoption.adopted) {
+      debug?.onWeek?.(wk, { skipped: true });
+      recordTemplate();
+      accumulateHabit(items);
+      continue;
+    }
+    const seed = analyzeWeek(items, placedByUid, droppedUids, c, config, adoption, today);
     if (!seed.needsMip) {
       debug?.onWeek?.(wk, { skipped: true });
       recordTemplate();
@@ -166,7 +189,7 @@ function solveWeeks(
     // ---- Phase A: the joint contention model (day assignment). Runs only on
     // real contention; growth-only weeks go straight to per-day packing. ----
     if (seed.contention) {
-      const occA = buildOccurrences(seed, wk, placedByUid, config);
+      const occA = buildOccurrences(seed, wk, placedByUid, config, today);
       if (occA.length > 0) {
         const obstaclesA = buildObstacles(occA, placedByUid, c);
         runModel(buildWeekModel({ occ: occA, obstacles: obstaclesA, config, habit: new Map(), phase: 'week' }), occA, 'A');
@@ -234,9 +257,13 @@ function analyzeWeek(
   droppedUids: Set<string>,
   c: Construction,
   config: GlobalConfig,
-  adoption: { adopted: boolean; adoptedDrops: Set<string> }
+  adoption: { adopted: boolean; adoptedDrops: Set<string> },
+  today: string
 ): WeekSeed {
   const { adopted, adoptedDrops } = adoption;
+  // Placements the temporal overlay will DROP (past days) are invisible to the
+  // user — they neither trigger a solve nor count as contention.
+  const visible = (p: Placement) => p.date >= today;
   const padding = config.padding ?? 0;
   const movable: Item[] = [];
   const frozen: Item[] = [];
@@ -272,10 +299,10 @@ function analyzeWeek(
     // overlap/padding/sleep participants and dropped optionals. An ADOPTED week
     // inherited already-optimized durations from its template — don't re-derive
     // them for every repeat of the same week.
-    if (!adopted && flexDur(item) && p.durationMin < item.intent.duration[1]) {
+    if (!adopted && flexDur(item) && p.durationMin < item.intent.duration[1] && visible(p)) {
       needsMip = true;
     }
-    if (p.placedDuringSleep && !item.pinned) {
+    if (p.placedDuringSleep && !item.pinned && visible(p)) {
       hot.add(item.slot.uid);
       needsMip = true;
       contention = true;
@@ -291,7 +318,7 @@ function analyzeWeek(
     const byIntentDay = new Map<string, Item[]>();
     for (const item of movable) {
       const p = placedByUid.get(item.slot.uid);
-      if (!p) continue;
+      if (!p || !visible(p)) continue;
       const k = `${item.slot.intentId}|${p.date}`;
       const arr = byIntentDay.get(k) ?? [];
       arr.push(item);
@@ -333,6 +360,7 @@ function analyzeWeek(
       if (f.endAbs > lo && f.startAbs < hi) nearby.push({ startAbs: f.startAbs, endAbs: f.endAbs, uid: null });
     }
     for (const { item, p } of weekPlaced) {
+      if (!visible(p)) continue; // invisible placements aren't contention
       const mine = occFor(p, c.origin);
       const iAmMovable = movableUids.has(item.slot.uid);
       for (const o of nearby) {
@@ -352,6 +380,79 @@ function analyzeWeek(
   return { items, movable, hot, frozen, needsMip, contention };
 }
 
+interface ArrangementEntry {
+  item: Item;
+  pos: { date: ISODate; startMin: number; durationMin: number } | null;
+}
+
+/**
+ * Score a week arrangement on [doubling, overlap, sleep, padding,
+ * −placedCount, −totalDuration] against the rest of the calendar — the same
+ * lexicographic order as the solver's stages, so adoption decisions and solved
+ * results are directly comparable.
+ */
+function scoreProposals(arr: ArrangementEntry[], items: Item[], c: Construction, config: GlobalConfig): number[] {
+  const uidSet = new Set(items.map((i) => i.slot.uid));
+  const others: Array<{ startAbs: number; endAbs: number }> = [];
+  for (const q of c.placements) if (!uidSet.has(q.slot.uid)) others.push(occFor(q, c.origin));
+  for (const f of c.fixedOccupied) others.push(f);
+  const mine = arr
+    .filter((p) => p.pos)
+    .map((p) => ({
+      item: p.item,
+      startAbs: absoluteMinutes(c.origin, p.pos!.date, p.pos!.startMin),
+      endAbs: absoluteMinutes(c.origin, p.pos!.date, p.pos!.startMin + p.pos!.durationMin),
+      pos: p.pos!,
+    }));
+  let ov = 0;
+  let ps = 0;
+  let sl = 0;
+  let dur = 0;
+  let dbl = 0;
+  const padding = config.padding ?? 0;
+  // Same-intent day doubling (per_day stacks exempt).
+  const perDay = new Map<string, number>();
+  for (const p of mine) {
+    if (p.item.slot.date === p.pos.date) continue; // native/stack residency
+    const k = `${p.item.slot.intentId}|${p.pos.date}`;
+    perDay.set(k, (perDay.get(k) ?? 0) + 1);
+  }
+  for (const [k, movers] of perDay) {
+    const hasNative = mine.some((p) => `${p.item.slot.intentId}|${p.pos.date}` === k && p.item.slot.date === p.pos.date);
+    dbl += Math.max(0, movers - (hasNative ? 0 : 1));
+  }
+  for (let i = 0; i < mine.length; i++) {
+    const a = mine[i];
+    dur += a.pos.durationMin;
+    if (!a.item.pinned) {
+      const bl = resolveSleepBlackout(a.pos.date, config);
+      sl += Math.max(0, bl.wakeStart - a.pos.startMin) + Math.max(0, a.pos.startMin + a.pos.durationMin - bl.sleepStart);
+    }
+    const consider = (s: number, e: number) => {
+      const overlap = Math.min(a.endAbs, e) - Math.max(a.startAbs, s);
+      if (overlap > 0) ov += overlap;
+      else if (padding > 0 && -overlap < padding) ps += padding + overlap;
+    };
+    for (let j = i + 1; j < mine.length; j++) consider(mine[j].startAbs, mine[j].endAbs);
+    for (const o of others) consider(o.startAbs, o.endAbs);
+  }
+  return [dbl, ov, sl, ps, -mine.length, -dur];
+}
+
+/** Score a week's CURRENT placements (used to stamp the template's quality). */
+function scoreWeekArrangement(
+  items: Item[],
+  placedByUid: Map<string, Placement>,
+  c: Construction,
+  config: GlobalConfig
+): number[] {
+  const arr: ArrangementEntry[] = items.map((item) => {
+    const p = placedByUid.get(item.slot.uid);
+    return { item, pos: p ? { date: p.date, startMin: p.startMin, durationMin: p.durationMin } : null };
+  });
+  return scoreProposals(arr, items, c, config);
+}
+
 /**
  * Try to adopt the previous week's solved arrangement (the template) as this
  * week's seed. Every item must map to a legal position (windows drift with
@@ -365,6 +466,7 @@ function tryAdoptTemplate(
   items: Item[],
   template: Map<string, { weekday: number; startMin: number; durationMin: number } | null>,
   templateKey: (item: Item, weekday: number) => string,
+  templateScore: number[] | null,
   placedByUid: Map<string, Placement>,
   c: Construction,
   config: GlobalConfig,
@@ -427,53 +529,102 @@ function tryAdoptTemplate(
     if (n > 1 && pr.pos.date !== pr.item.slot.date) { dbgAdopt('day-exclusivity', pr.item.slot.uid); return none; }
   }
 
-  // Compare translated vs current greedy seed: [overlap, sleep, padding,
-  // −placedCount, −totalDuration], lexicographic; adopt only when ≤.
-  const uidSet = new Set(items.map((i) => i.slot.uid));
-  const others: Array<{ startAbs: number; endAbs: number }> = [];
-  for (const q of c.placements) if (!uidSet.has(q.slot.uid)) others.push(occFor(q, c.origin));
-  for (const f of c.fixedOccupied) others.push(f);
-  const score = (arr: Proposal[]): number[] => {
-    const mine = arr
-      .filter((p) => p.pos)
-      .map((p) => ({
-        item: p.item,
-        startAbs: absoluteMinutes(c.origin, p.pos!.date, p.pos!.startMin),
-        endAbs: absoluteMinutes(c.origin, p.pos!.date, p.pos!.startMin + p.pos!.durationMin),
-        pos: p.pos!,
-      }));
-    let ov = 0;
-    let ps = 0;
-    let sl = 0;
-    let dur = 0;
-    const padding = config.padding ?? 0;
-    for (let i = 0; i < mine.length; i++) {
-      const a = mine[i];
-      dur += a.pos.durationMin;
-      if (!a.item.pinned) {
-        const bl = resolveSleepBlackout(a.pos.date, config);
-        sl += Math.max(0, bl.wakeStart - a.pos.startMin) + Math.max(0, a.pos.startMin + a.pos.durationMin - bl.sleepStart);
-      }
-      const consider = (s: number, e: number) => {
-        const overlap = Math.min(a.endAbs, e) - Math.max(a.startAbs, s);
-        if (overlap > 0) ov += overlap;
-        else if (padding > 0 && -overlap < padding) ps += padding + overlap;
-      };
-      for (let j = i + 1; j < mine.length; j++) consider(mine[j].startAbs, mine[j].endAbs);
-      for (const o of others) consider(o.startAbs, o.endAbs);
+  // POLISH: solar-pinned events (e.g. "watch sunset") drift a little every
+  // day, so a literal translation leaves small overlaps against them. Greedy's
+  // repair pass (single-move, milliseconds) absorbs that drift before the
+  // quality gate — most weeks then reproduce the template score EXACTLY.
+  {
+    const uidSet = new Set(items.map((i) => i.slot.uid));
+    // Obstacles limited to the week's absolute neighborhood (±1 day) — repair
+    // scans its obstacle list per candidate slot, so handing it the whole
+    // calendar (~thousands) would cost more than the solve it avoids.
+    const bases = proposals.filter((pr) => pr.pos).map((pr) => absoluteMinutes(c.origin, pr.pos!.date, 0));
+    const lo = (bases.length ? Math.min(...bases) : 0) - 1440;
+    const hi = (bases.length ? Math.max(...bases) : 0) + 2880;
+    const fixed: Occupied[] = [];
+    for (const q of c.placements) {
+      if (uidSet.has(q.slot.uid)) continue;
+      const o = occFor(q, c.origin);
+      if (o.endAbs > lo && o.startAbs < hi) fixed.push(o);
     }
-    return [ov, sl, ps, -mine.length, -dur];
-  };
+    for (const f of c.fixedOccupied) if (f.endAbs > lo && f.startAbs < hi) fixed.push(f);
+    const temp: Placement[] = [];
+    const byProposal = new Map<ArrangementEntry, Placement>();
+    for (const pr of proposals) {
+      if (!pr.pos) continue;
+      const pl: Placement = {
+        slot: pr.item.slot,
+        intent: pr.item.intent,
+        date: pr.pos.date,
+        startMin: pr.pos.startMin,
+        durationMin: pr.pos.durationMin,
+        placedDuringSleep: false,
+        pinned: pr.item.pinned,
+        endPinned: pr.item.endPinned,
+      };
+      temp.push(pl);
+      byProposal.set(pr, pl);
+    }
+    const before = new Map(temp.map((pl) => [pl, { date: pl.date, startMin: pl.startMin }]));
+    repair(temp, fixed, config, c.origin);
+    // repair()'s move search doesn't know about day-exclusivity — it will
+    // happily "fix" a structurally-forced overlap (park vs work) by moving the
+    // occurrence onto a same-intent day. Revert any move that created a
+    // doubling; drift fixes (time shifts on the same day) survive.
+    const residents = new Map<string, Placement[]>();
+    for (const pl of temp) {
+      const k = `${pl.slot.intentId}|${pl.date}`;
+      const arr = residents.get(k) ?? [];
+      arr.push(pl);
+      residents.set(k, arr);
+    }
+    for (const group of residents.values()) {
+      if (group.length < 2) continue;
+      const stackDate = group[0].slot.date;
+      if (group.every((g) => g.slot.date === stackDate)) continue; // per_day stack
+      for (const pl of group) {
+        const b = before.get(pl)!;
+        if (b.date !== pl.date) {
+          pl.date = b.date;
+          pl.startMin = b.startMin;
+        }
+      }
+    }
+    for (const [pr, pl] of byProposal) {
+      pr.pos = { date: pl.date, startMin: pl.startMin, durationMin: pl.durationMin };
+    }
+  }
 
+  // Compare translated vs BOTH baselines, lexicographic on
+  // [doubling, overlap, sleep, padding, −placedCount, −totalDuration]:
+  //  - the current greedy seed (adoption must never make the week worse), and
+  //  - the TEMPLATE week's achieved score (a translation must reproduce the
+  //    solved quality; beating a doubled greedy seed alone is a low bar, and
+  //    accepting degraded translations compounds week over week).
   const current: Proposal[] = items.map((item) => {
     const p = placedByUid.get(item.slot.uid);
     return { item, pos: p ? { date: p.date, startMin: p.startMin, durationMin: p.durationMin } : null };
   });
-  const sTranslated = score(proposals);
-  const sCurrent = score(current);
+  const sTranslated = scoreProposals(proposals, items, c, config);
+  const sCurrent = scoreProposals(current, items, c, config);
   for (let k = 0; k < sTranslated.length; k++) {
     if (sTranslated[k] < sCurrent[k]) break;
     if (sTranslated[k] > sCurrent[k]) { dbgAdopt('score', `tier ${k}: ${sTranslated[k]} > ${sCurrent[k]}`); return none; }
+  }
+  if (templateScore) {
+    // Post-polish tolerance: repair absorbs most solar drift; what's left is
+    // minutes-scale wobble (a sunset event a few minutes shorter, a 5-minute
+    // residual overlap) that isn't worth a multi-second re-solve. Bounded
+    // relative to the TEMPLATE (updated only on real solves) → no compounding.
+    // Doubling and the placed count stay exact.
+    const tol = [0, 0, 0, 10, 0, 45];
+    for (let k = 0; k < sTranslated.length; k++) {
+      if (sTranslated[k] < templateScore[k]) break;
+      if (sTranslated[k] > templateScore[k] + tol[k]) {
+        dbgAdopt('template-degraded', `tier ${k}: ${sTranslated[k]} > ${templateScore[k]} + ${tol[k]}`);
+        return none;
+      }
+    }
   }
 
   // Adopt.
@@ -523,7 +674,8 @@ function buildOccurrences(
   seed: WeekSeed,
   weekKey: string,
   placedByUid: Map<string, Placement>,
-  config: GlobalConfig
+  config: GlobalConfig,
+  today: string
 ): WeekOccurrence[] {
   const grid = Math.max(1, config.grid);
   const out: WeekOccurrence[] = [];
@@ -531,19 +683,24 @@ function buildOccurrences(
     const p = placedByUid.get(item.slot.uid);
     const seedPos = p ? { date: p.date, startMin: p.startMin, durationMin: p.durationMin } : null;
     // Non-hot occurrences stay on their CURRENT date (greedy may have spilled
-    // them off slot.date); hot ones may roam bucketDates ∩ week.
+    // them off slot.date); hot ones may roam bucketDates ∩ week — but never
+    // into the past: a placement the overlay drops looks in-model-clean while
+    // silently deleting a required occurrence from the visible calendar.
     const anchor = seedPos?.date ?? item.slot.date;
     let days: ISODate[];
     if (item.pinned || !item.slot.flexibleDay || !seed.hot.has(item.slot.uid)) {
       days = [anchor];
     } else {
-      const cand = new Set<ISODate>([item.slot.date, anchor]);
+      const cand = new Set<ISODate>();
+      if (item.slot.date >= today) cand.add(item.slot.date);
+      if (anchor >= today) cand.add(anchor);
       for (const d of item.slot.bucketDates ?? []) {
-        if (isoWeekKey(d) !== weekKey) continue;
+        if (isoWeekKey(d) !== weekKey || d < today) continue;
         const rw = resolveWindow(item.intent.window, d, config);
         const lo = Math.ceil(rw.notBefore / grid) * grid;
         if (rw.notAfter - item.intent.duration[0] >= lo) cand.add(d);
       }
+      if (cand.size === 0) cand.add(anchor); // everything is past — leave it be
       days = [...cand].sort();
     }
     out.push({ item, days, seed: seedPos });

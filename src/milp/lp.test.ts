@@ -174,13 +174,15 @@ test('day-exclusivity: a mover may not join a day with a fixed native of the sam
     habit: new Map(),
     phase: 'week',
   });
-  // Native is fixed-present on 07-08 → the mover joining that day must pay the
-  // day-doubling slack, which the daydouble tier (right after overlap) drives
-  // to zero — so effectively forbidden unless the seed itself was doubled.
-  assert.ok(model.constraints.some((c) => c.startsWith('xf_gym_20260708') && c.includes('- 1 xv_gym_') && c.endsWith('<= 0')));
+  // Native is fixed-present on 07-08 (a constant resident) → the mover joining
+  // that day must pay the day-doubling slack: Σ movers − xv ≤ 1 − fixed = 0.
+  // The daydouble tier outranks EVERYTHING (overlap included): never double —
+  // if the floor doesn't fit the clean days, surface the overlap conflict.
+  assert.ok(model.constraints.some((c) => c.startsWith('xd_gym_20260708') && c.includes('- 1 xv_gym_') && c.endsWith('<= 0')));
+  const names = model.stages.map((s) => s.name);
   const dbl = model.stages.find((s) => s.name === 'daydouble')!;
   assert.equal(dbl.ideal, 0);
-  assert.equal(model.stages.map((s) => s.name).indexOf('daydouble'), model.stages.map((s) => s.name).indexOf('overlap') + 1);
+  assert.ok(names.indexOf('daydouble') < names.indexOf('overlap'));
 });
 
 test('habit: |s − h| rows appear only with a target; gated for optionals', () => {

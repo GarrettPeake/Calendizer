@@ -97,7 +97,7 @@ export function assembleSchedule(input: AssembleInput): AssembleResult {
 
   const perf = (globalThis as { performance?: { now?: () => number } }).performance;
   const t0 = perf?.now?.() ?? Date.now();
-  const out = solver.solve({ config, intents: liveIntents, modes, existingCalendar, horizon });
+  const out = solver.solve({ config, intents: liveIntents, modes, existingCalendar, horizon, today });
   const solveMs = Math.round((perf?.now?.() ?? Date.now()) - t0);
 
   // Overlay: immutable frozen past over projected past (past projections drop),

@@ -189,6 +189,13 @@ export interface SolveInput {
   modes?: Mode[];
   existingCalendar?: CalendarEvent[];
   horizon: { start: ISODate; end: ISODate };
+  /**
+   * The first day that is still visible/placeable (occurrences the pipeline
+   * projects onto earlier days are dropped by the temporal overlay). Solvers
+   * MAY use it to keep movable occurrences out of the invisible past — two
+   * in-model-equivalent optima can differ in what the user actually sees.
+   */
+  today?: ISODate;
 }
 
 export interface SolveOutput {
