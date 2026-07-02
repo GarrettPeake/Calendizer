@@ -21,28 +21,45 @@ const MESSAGES = [
   'Calibrating the fourth dimension',
 ];
 
-function pickMessage(prev: string | null, intents: Intent[]): string {
-  for (let tries = 0; tries < 8; tries++) {
-    let m = MESSAGES[Math.floor(Math.random() * MESSAGES.length)];
+/**
+ * Shuffle-bag selection: draw templates randomly WITHOUT replacement; when the
+ * bag empties, refill it. Every message appears once per cycle — random order,
+ * no repeats. The only special cases: the "{intent}" template is discarded when
+ * there's nothing to name, and a fresh bag won't open with the message that
+ * just closed the previous one.
+ */
+function drawMessage(bag: string[], prev: string | null, intents: Intent[]): string {
+  for (let tries = 0; tries < MESSAGES.length * 2; tries++) {
+    if (bag.length === 0) bag.push(...MESSAGES);
+    let m = bag.splice(Math.floor(Math.random() * bag.length), 1)[0];
     if (m.includes('{intent}')) {
-      if (intents.length === 0) continue; // nothing to name — pick another
+      if (intents.length === 0) continue; // nothing to name — discard this draw
       m = m.replace('{intent}', intents[Math.floor(Math.random() * intents.length)].subject);
     }
-    if (m !== prev) return m;
+    if (m === prev && bag.length > 0) {
+      bag.push(m); // cross-refill collision: keep it in the cycle, draw another
+      continue;
+    }
+    return m;
   }
   return MESSAGES[3];
 }
 
 export function SolveOverlay({ phase, progress, intents }: { phase: OverlayPhase; progress: number; intents: Intent[] }) {
-  const [message, setMessage] = useState(() => pickMessage(null, intents));
-  const [msgKey, setMsgKey] = useState(0); // remount → re-run the entry animation
+  const bagRef = useRef<string[]>([]);
   const intentsRef = useRef(intents);
   intentsRef.current = intents;
+  const [message, setMessage] = useState(() => drawMessage(bagRef.current, null, intents));
+  const lastRef = useRef(message);
+  const [msgKey, setMsgKey] = useState(0); // remount → re-run the entry animation
 
   useEffect(() => {
     if (phase !== 'solving') return;
     const t = setInterval(() => {
-      setMessage((prev) => pickMessage(prev, intentsRef.current));
+      // Draw outside the state updater — it mutates the bag (side effect).
+      const next = drawMessage(bagRef.current, lastRef.current, intentsRef.current);
+      lastRef.current = next;
+      setMessage(next);
       setMsgKey((k) => k + 1);
     }, 2200);
     return () => clearInterval(t);
