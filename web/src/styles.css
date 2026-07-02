@@ -388,3 +388,84 @@ label.field span { display: block; margin-bottom: 3px; }
 }
 .report-bug svg { width: 14px; height: 14px; }
 .report-bug:hover { color: var(--accent); }
+
+/* ---------------- solve overlay (worker progress + success beat) ---------------- */
+.cal-stage {
+  position: relative;
+}
+.cal-reveal {
+  animation: calReveal 100ms ease-out;
+}
+@keyframes calReveal {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.solve-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  display: block;
+  border-radius: 12px;
+  background: rgba(55, 60, 72, 0.62);
+  backdrop-filter: blur(1.5px);
+  transition: background-color 200ms ease, opacity 100ms ease;
+}
+.solve-overlay.success,
+.solve-overlay.fadeout {
+  background: rgba(34, 160, 90, 0.72);
+}
+.solve-overlay.fadeout {
+  opacity: 0;
+  pointer-events: none;
+}
+.solve-box {
+  /* The grid under the veil is ~1440px tall — stick the box to the VISIBLE
+     viewport rather than centering in the full scroll height. */
+  position: sticky;
+  top: 38vh;
+  margin: 0 auto;
+  width: fit-content;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  min-height: 72px;
+  justify-content: center;
+}
+.solve-msg {
+  color: #fff;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+  animation: solveMsgIn 480ms ease;
+}
+.solve-msg.solved {
+  animation-duration: 180ms;
+}
+@keyframes solveMsgIn {
+  from { opacity: 0; transform: translateY(7px) rotate(-1.5deg); }
+  60% { transform: translateY(-1px) rotate(0.4deg); }
+  to { opacity: 1; transform: none; }
+}
+.solve-track {
+  width: 260px;
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.28);
+  overflow: hidden;
+}
+.solve-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: #fff;
+  box-shadow: 0 0 8px rgba(255, 255, 255, 0.6);
+  transition: width 350ms ease;
+}
+.solve-check {
+  animation: solveCheckIn 200ms cubic-bezier(0.2, 1.4, 0.4, 1);
+}
+@keyframes solveCheckIn {
+  from { transform: scale(0.4); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}

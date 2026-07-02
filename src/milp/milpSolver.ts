@@ -36,8 +36,10 @@ import { resolveWindow, resolveSleepBlackout } from '../markers';
 import { buildWeekModel, DayObstacle, WeekOccurrence, WeekModel } from './lp';
 import { HighsInstance, runStages, StageTrace } from './stages';
 
-/** Optional hook so tooling (scripts/solve-debug) can capture per-week traces. */
+/** Optional hooks: per-week traces for tooling, and start/per-week ticks that
+ *  double as a REAL progress signal (weeks done / total) for UIs. */
 export interface MilpDebugSink {
+  onStart?(totalWeeks: number): void;
   onWeek?(weekKey: string, info: { skipped: boolean; fallback?: boolean; memo?: boolean; trace?: StageTrace[] }): void;
 }
 
@@ -78,6 +80,7 @@ function solveWeeks(
     weeks.set(wk, arr);
   }
   const weekKeys = [...weeks.keys()].sort();
+  debug?.onStart?.(weekKeys.length);
 
   // Habit: modal start per (intentId, perDayIndex) across already-final weeks.
   const habitCounts = new Map<string, Map<number, number>>();

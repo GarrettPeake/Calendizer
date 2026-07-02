@@ -6,8 +6,10 @@
  * (and its model memo) persists across edits, so re-solves only pay for the
  * weeks an edit actually changed.
  *
- * Protocol: { id, kind: 'preview' | 'optimize', input } →
- *           { id, ok: true, result } | { id, ok: false, error }
+ * Protocol:
+ *   in : { id, kind: 'preview' | 'optimize', input }
+ *   out: { id, type: 'progress', done, total }   (optimize only, per solved week)
+ *        { id, type: 'result', ok, result?, error? }
  * `input` is a full AssembleInput minus the solver (nowDT/today are computed on
  * the MAIN thread so a preview/optimize pair shares the same instant).
  */
@@ -19,12 +21,16 @@ export interface SolveRequest {
   input: Omit<AssembleInput, 'solver'>;
 }
 
-export interface SolveReply {
-  id: number;
-  ok: boolean;
-  result?: ReturnType<typeof assembleSchedule> & { computedAt: string };
-  error?: string;
-}
+export type WorkerMessage =
+  | { id: number; type: 'progress'; done: number; total: number }
+  | { id: number; type: 'result'; ok: true; result: ReturnType<typeof assembleSchedule> & { computedAt: string } }
+  | { id: number; type: 'result'; ok: false; error: string };
+
+// Progress routing: the worker's event loop serializes solves (they're
+// synchronous), so one mutable target is safe.
+let reportProgress: ((done: number, total: number) => void) | null = null;
+let weeksDone = 0;
+let weeksTotal = 0;
 
 let milpPromise: Promise<Solver | null> | null = null;
 
@@ -37,7 +43,16 @@ function getMilp(): Promise<Solver | null> {
           import('highs/runtime?url'),
         ]);
         const highs = await loadHighs({ locateFile: () => wasmUrl });
-        return createMilpSolver(highs);
+        return createMilpSolver(highs, {
+          onStart(total) {
+            weeksDone = 0;
+            weeksTotal = total;
+            reportProgress?.(0, total);
+          },
+          onWeek() {
+            reportProgress?.(++weeksDone, weeksTotal);
+          },
+        });
       } catch {
         return null; // WASM unavailable → optimize degrades to the greedy result
       }
@@ -50,11 +65,25 @@ self.onmessage = async (e: MessageEvent<SolveRequest>) => {
   const { id, kind, input } = e.data;
   try {
     const solver = kind === 'optimize' ? await getMilp() : null;
+    reportProgress =
+      kind === 'optimize'
+        ? (done, total) => self.postMessage({ id, type: 'progress', done, total } satisfies WorkerMessage)
+        : null;
     const r = assembleSchedule({ ...input, solver: solver ?? undefined });
-    const reply: SolveReply = { id, ok: true, result: { ...r, computedAt: new Date().toISOString() } };
-    self.postMessage(reply);
+    reportProgress = null;
+    self.postMessage({
+      id,
+      type: 'result',
+      ok: true,
+      result: { ...r, computedAt: new Date().toISOString() },
+    } satisfies WorkerMessage);
   } catch (err) {
-    const reply: SolveReply = { id, ok: false, error: err instanceof Error ? err.message : String(err) };
-    self.postMessage(reply);
+    reportProgress = null;
+    self.postMessage({
+      id,
+      type: 'result',
+      ok: false,
+      error: err instanceof Error ? err.message : String(err),
+    } satisfies WorkerMessage);
   }
 };

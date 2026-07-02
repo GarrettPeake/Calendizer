@@ -14,6 +14,7 @@ import {
 } from './api';
 import { computeSchedule } from './lib/solve';
 import { nowInOffset, solveInWorker } from './lib/solveWorker';
+import { SolveOverlay, type OverlayPhase } from './components/SolveOverlay';
 
 type SaveStatus = 'saved' | 'processing' | 'saving' | 'error';
 const SAVE_RETRIES = 3;
@@ -69,6 +70,10 @@ export function App() {
   // background with a status indicator, coalescing, retries, and a failure toast.
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('saved');
   const [toast, setToast] = useState<string | null>(null);
+  // Solve overlay: hides the calendar while the worker computes (a greedy
+  // preview that later "loses" its conflicts reads as flaky), shows a real
+  // per-week progress bar, then a short success beat before revealing events.
+  const [overlay, setOverlay] = useState<{ phase: OverlayPhase; progress: number } | null>(null);
   const pendingSave = useRef<{ state: PublishState; calendar: CalendarPayload } | null>(null);
   const saving = useRef(false);
   const unsaved = useRef(false); // gates the navigate-away warning
@@ -179,11 +184,12 @@ export function App() {
 
   /**
    * The single write path. Applies the next inputs to local state INSTANTLY,
-   * then solves in the WEB WORKER (greedy preview first, then the MIP optimize
-   * — WASM and all), so the main thread never blocks and the browser's
-   * "this page is slowing things down" heuristics never fire. The optimized
+   * then solves in the WEB WORKER (the MIP optimize, WASM and all), so the main
+   * thread never blocks. While the worker runs, the calendar is veiled by the
+   * solve overlay with a real per-week progress bar — no greedy preview is
+   * shown (conflicts that later vanish read as flakiness). The optimized
    * schedule is what publishes — inputs and calendar go together, so they can
-   * never diverge; if the worker or WASM is unavailable, the greedy result
+   * never diverge; if the worker or WASM is unavailable, a greedy solve
    * publishes instead. A sequence token coalesces rapid edits: only the latest
    * edit's results are applied and saved.
    */
@@ -201,25 +207,21 @@ export function App() {
     setSaveStatus('processing');
     const seq = ++solveSeq.current;
     const nowDT = nowInOffset(nextConfig.utcOffsetMinutes ?? 0);
+    setOverlay({ phase: 'solving', progress: 0 });
     (async () => {
       if (seq !== solveSeq.current) return; // superseded by a newer edit
-      // 1. Greedy preview (worker; synchronous main-thread fallback).
-      const preview = await solveInWorker('preview', nextConfig, nextIntents, nextModes, previous, nowDT).catch(() =>
-        computeSchedule(nextConfig, nextIntents, nextModes, previous)
-      );
-      if (seq !== solveSeq.current) return;
-      setSolveResp({
-        instances: preview.instances,
-        conflicts: preview.conflicts,
-        horizon: preview.horizon,
-        solveMs: preview.solveMs,
-        computedAt: preview.computedAt,
-        cached: false,
-      });
-      // 2. Optimize (degrades to the preview if the worker/WASM is unavailable).
-      const r = await solveInWorker('optimize', nextConfig, nextIntents, nextModes, previous, nowDT).catch(
-        () => preview
-      );
+      const onProgress = (done: number, total: number) => {
+        if (seq !== solveSeq.current) return;
+        // The greedy seed inside the solve runs before week ticks — hold a
+        // small head start so the bar never sits at a dead zero.
+        const p = total > 0 ? 0.04 + 0.96 * (done / total) : 0.04;
+        setOverlay((o) => (o && o.phase === 'solving' ? { phase: 'solving', progress: p } : o));
+      };
+      // Optimize in the worker; degrade to a greedy solve (worker, then main
+      // thread) only if that fails.
+      const r = await solveInWorker('optimize', nextConfig, nextIntents, nextModes, previous, nowDT, { onProgress })
+        .catch(() => solveInWorker('preview', nextConfig, nextIntents, nextModes, previous, nowDT))
+        .catch(() => computeSchedule(nextConfig, nextIntents, nextModes, previous));
       if (seq !== solveSeq.current) return;
       const liveIntents = r.reapedIntentIds.length
         ? nextIntents.filter((i) => !r.reapedIntentIds.includes(i.id!))
@@ -244,6 +246,15 @@ export function App() {
         },
       };
       pumpSaves();
+      // Success beat: checkmark + "Solved" on green (200ms), then the overlay
+      // fades out (100ms) while the events fade in underneath.
+      setOverlay({ phase: 'success', progress: 1 });
+      window.setTimeout(() => {
+        if (seq === solveSeq.current) setOverlay((o) => (o ? { phase: 'fadeout', progress: 1 } : o));
+      }, 200);
+      window.setTimeout(() => {
+        if (seq === solveSeq.current) setOverlay(null);
+      }, 300);
     })();
   }
 
@@ -472,7 +483,7 @@ export function App() {
           <div className="conflict-banner">
             <b>Error:</b> {error} <button className="btn tiny ghost" onClick={() => setError(null)}>Dismiss</button>
           </div>
-        ) : conflicts.length ? (
+        ) : !overlay && conflicts.length ? (
           <div className="conflict-banner">
             <b>{conflicts.length} conflict{conflicts.length > 1 ? 's' : ''} this week:</b>
             <ul>
@@ -483,16 +494,21 @@ export function App() {
           </div>
         ) : null}
 
-        <WeekCalendar
-          days={days}
-          fixed={NO_FIXED}
-          instances={solveResp?.instances ?? []}
-          today={today}
-          now={now}
-          modes={modes}
-          wakeup={config?.wakeup}
-          sleep={config?.sleep}
-        />
+        <div className="cal-stage">
+          <div className={overlay?.phase === 'fadeout' ? 'cal-reveal' : undefined}>
+            <WeekCalendar
+              days={days}
+              fixed={NO_FIXED}
+              instances={overlay && overlay.phase !== 'fadeout' ? [] : solveResp?.instances ?? []}
+              today={today}
+              now={now}
+              modes={modes}
+              wakeup={config?.wakeup}
+              sleep={config?.sleep}
+            />
+          </div>
+          {overlay ? <SolveOverlay phase={overlay.phase} progress={overlay.progress} intents={intents} /> : null}
+        </div>
       </div>
 
       {editing ? (
