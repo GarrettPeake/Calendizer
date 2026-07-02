@@ -16,10 +16,14 @@ import { StageObjective, WeekModel } from './lp';
 export interface HighsInstance {
   solve(problem: string, options?: Record<string, unknown>): HighsResult;
 }
+/** Structural subset of the `highs` package's solution type (infeasible
+ *  solutions carry no Primal — treated as unusable below). */
 export interface HighsResult {
   Status: string;
   ObjectiveValue: number;
-  Columns: Record<string, { Primal: number }>;
+  /** Column objects carry `Primal` for feasible solutions (read defensively —
+   *  the concrete `highs` package types vary by solution kind). */
+  Columns: Record<string, unknown>;
 }
 
 export const HIGHS_OPTIONS: Record<string, unknown> = {
@@ -147,7 +151,9 @@ export function runStages(highs: HighsInstance, model: WeekModel): StagesResult 
         return { values: null, trace };
       }
       values = new Map<string, number>();
-      for (const [name, col] of Object.entries(res.Columns)) values.set(name, col.Primal);
+      for (const [name, col] of Object.entries(res.Columns)) {
+        values.set(name, (col as { Primal?: number }).Primal ?? 0);
+      }
       solvedAny = true;
       const objective = evalTerms(stage.terms, values);
       trace.push({ name: stage.name, objective, lp, ms: Date.now() - t0 });

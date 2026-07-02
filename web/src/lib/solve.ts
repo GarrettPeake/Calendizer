@@ -1,8 +1,10 @@
 /**
  * Client-side scheduling. The pure `assembleSchedule` pipeline (shared with the
  * Worker fallback) runs in the browser: instant preview, no server round-trip.
+ * Pass a `solver` (the lazily-loaded MIP from ./milp) to optimize; without one
+ * the greedy engine runs — that's the instant-preview path.
  */
-import { assembleSchedule, type GlobalConfig, type Instance } from 'calendizer';
+import { assembleSchedule, type GlobalConfig, type Instance, type Solver } from 'calendizer';
 import type { ModeRecord } from '../api';
 
 export interface ClientSchedule {
@@ -28,11 +30,12 @@ export function computeSchedule(
   config: GlobalConfig,
   intents: Parameters<typeof assembleSchedule>[0]['intents'],
   modes: ModeRecord[],
-  previous: Instance[]
+  previous: Instance[],
+  solver?: Solver
 ): ClientSchedule {
   const offset = config.utcOffsetMinutes ?? 0;
   const nowDT = nowInOffset(offset);
   const today = nowDT.slice(0, 10);
-  const r = assembleSchedule({ config, intents, modeRecords: modes, frozen: previous, nowDT, today });
+  const r = assembleSchedule({ config, intents, modeRecords: modes, frozen: previous, nowDT, today, solver });
   return { ...r, computedAt: new Date().toISOString() };
 }

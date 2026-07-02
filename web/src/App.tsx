@@ -13,6 +13,7 @@ import {
   type User,
 } from './api';
 import { computeSchedule } from './lib/solve';
+import { loadMilp } from './lib/milp';
 
 type SaveStatus = 'saved' | 'processing' | 'saving' | 'error';
 const SAVE_RETRIES = 3;
@@ -71,6 +72,7 @@ export function App() {
   const pendingSave = useRef<{ state: PublishState; calendar: CalendarPayload } | null>(null);
   const saving = useRef(false);
   const unsaved = useRef(false); // gates the navigate-away warning
+  const solveSeq = useRef(0); // coalesces rapid edits: only the latest solve applies
 
   // Warn before leaving with an unsaved (unpublished or failed) change.
   useEffect(() => {
@@ -176,10 +178,12 @@ export function App() {
   }
 
   /**
-   * The single write path. Applies the next inputs to local state INSTANTLY, then
-   * recomputes the calendar and queues an async publish (recompute is deferred a
-   * tick so the edit feels immediate). Inputs and calendar publish together, so
-   * they can never diverge.
+   * The single write path. Applies the next inputs to local state INSTANTLY,
+   * renders a greedy preview a tick later, then swaps in the OPTIMIZED schedule
+   * (the lazily-loaded MIP solver) and publishes THAT — inputs and calendar go
+   * together, so they can never diverge. If the WASM never loads, the greedy
+   * result publishes instead. A sequence token coalesces rapid edits: only the
+   * latest edit's results are applied and saved.
    */
   function applyChange(
     nextConfig: GlobalConfig,
@@ -193,8 +197,24 @@ export function App() {
     setModes(nextModes);
     unsaved.current = true;
     setSaveStatus('processing');
-    setTimeout(() => {
-      const r = computeSchedule(nextConfig, nextIntents, nextModes, previous);
+    const seq = ++solveSeq.current;
+    setTimeout(async () => {
+      if (seq !== solveSeq.current) return; // superseded by a newer edit
+      // 1. Instant greedy preview.
+      const preview = computeSchedule(nextConfig, nextIntents, nextModes, previous);
+      setSolveResp({
+        instances: preview.instances,
+        conflicts: preview.conflicts,
+        horizon: preview.horizon,
+        solveMs: preview.solveMs,
+        computedAt: preview.computedAt,
+        cached: false,
+      });
+      // 2. Optimize (falls back to the preview if the solver isn't available).
+      const milp = await loadMilp();
+      if (seq !== solveSeq.current) return;
+      const r = milp ? computeSchedule(nextConfig, nextIntents, nextModes, previous, milp) : preview;
+      if (seq !== solveSeq.current) return;
       const liveIntents = r.reapedIntentIds.length
         ? nextIntents.filter((i) => !r.reapedIntentIds.includes(i.id!))
         : nextIntents;
