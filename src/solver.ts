@@ -45,13 +45,13 @@ import { detectModeOverlaps } from './modes';
 import { expandIntent, Slot, slugify } from './expand';
 import { tileChildren } from './children';
 
-interface Occupied {
+export interface Occupied {
   startAbs: number;
   endAbs: number;
   label: string; // subject or uid for conflict reporting
 }
 
-interface Placement {
+export interface Placement {
   slot: Slot;
   intent: Intent;
   date: ISODate;
@@ -74,7 +74,78 @@ export interface Solver {
   solve(input: SolveInput): SolveOutput;
 }
 
-export function solve(input: SolveInput): SolveOutput {
+/**
+ * A (intent, slot) work item. A slot whose window resolves to a pinned start
+ * (starts_at) is HARD/immovable; flexible slots can go anywhere in their
+ * window. All pinned slots are placed FIRST so flexible occurrences — even
+ * higher-priority ones — route around the times the user fixed, instead of
+ * squatting a slot a pinned event then has no choice but to overlap.
+ */
+export interface Item {
+  intent: Intent;
+  slot: Slot;
+  pinned: boolean;
+  /** True when the pin is an ends_at (end fixed, start = end − duration). */
+  endPinned: boolean;
+  /**
+   * Per-occurrence window slack = resolved window width / duration floor. A
+   * small value means the occurrence has few places it can legally sit (a
+   * narrow window, a big block), so it is the most-constrained and should be
+   * placed FIRST so looser, wider-window neighbours route around it rather than
+   * squatting the one slot it needs. Pinned occurrences are maximally
+   * constrained (a single legal position) → 0.
+   */
+  slack: number;
+}
+
+/**
+ * Placement tiers: pinned (hard) first, then guaranteed (floor), then optional
+ * aspiration occurrences last — so extras only claim slots nothing else needs.
+ */
+export function tierOf(it: Item): number {
+  return it.pinned ? 0 : it.slot.optional ? 2 : 1;
+}
+
+/**
+ * The canonical deterministic item comparator: tier, then priority desc, then
+ * most-constrained (least slack) first, then subject/id/date/perDayIndex.
+ * Shared by the greedy pass, the fillToMax re-pack, and conflict attribution.
+ */
+export function orderItems(a: Item, b: Item): number {
+  const ta = tierOf(a);
+  const tb = tierOf(b);
+  if (ta !== tb) return ta - tb;
+  if (b.intent.priority !== a.intent.priority) return b.intent.priority - a.intent.priority;
+  if (a.slack !== b.slack) return a.slack - b.slack; // most-constrained first
+  if (a.intent.subject !== b.intent.subject) return a.intent.subject.localeCompare(b.intent.subject);
+  const aid = a.intent.id ?? '';
+  const bid = b.intent.id ?? '';
+  if (aid !== bid) return aid.localeCompare(bid);
+  if (a.slot.date !== b.slot.date) return a.slot.date < b.slot.date ? -1 : 1;
+  return a.slot.perDayIndex - b.slot.perDayIndex;
+}
+
+/** Everything the greedy seed produced, exposed so other engines can build on it. */
+export interface Construction {
+  /** Seeded placements, in placement (item) order. */
+  placements: Placement[];
+  /** Optional (aspiration) items dropped at seed time — no clean slot existed. */
+  dropped: Item[];
+  /** Immovable fixed-event obstacles, in absolute minutes from `origin`. */
+  fixedOccupied: Occupied[];
+  /** mode-overlap + window-unsatisfiable conflicts raised during construction. */
+  conflicts: ConflictReport[];
+  origin: ISODate;
+}
+
+/**
+ * The greedy construction: expand intents to items, order them (pinned →
+ * guaranteed → optional; priority desc; least window-slack first), then seed
+ * each occurrence at its best (min-overlap) slot. Optional occurrences are
+ * placed only when they fit cleanly; otherwise they are recorded as dropped
+ * (never forced, never a conflict).
+ */
+export function constructGreedy(input: SolveInput): Construction {
   const { config, intents } = input;
   const modes = input.modes ?? [];
   const existing = input.existingCalendar ?? [];
@@ -104,27 +175,6 @@ export function solve(input: SolveInput): SolveOutput {
     return (a.id ?? '').localeCompare(b.id ?? '');
   });
 
-  // Flatten to (intent, slot) work items. A slot whose window resolves to a
-  // pinned start (starts_at) is HARD/immovable; flexible slots can go anywhere
-  // in their window. We place all pinned slots FIRST so flexible occurrences —
-  // even higher-priority ones — route around the times the user fixed, instead
-  // of squatting a slot a pinned event then has no choice but to overlap.
-  interface Item {
-    intent: Intent;
-    slot: Slot;
-    pinned: boolean;
-    /** True when the pin is an ends_at (end fixed, start = end − duration). */
-    endPinned: boolean;
-    /**
-     * Per-occurrence window slack = resolved window width / duration floor. A
-     * small value means the occurrence has few places it can legally sit (a
-     * narrow window, a big block), so it is the most-constrained and should be
-     * placed FIRST so looser, wider-window neighbours route around it rather than
-     * squatting the one slot it needs. Pinned occurrences are maximally
-     * constrained (a single legal position) → 0.
-     */
-    slack: number;
-  }
   const items: Item[] = [];
   ordered.forEach((intent) => {
     for (const slot of expandIntent(intent, horizonDates, modes, config.fillToMax)) {
@@ -136,35 +186,21 @@ export function solve(input: SolveInput): SolveOutput {
       items.push({ intent, slot, pinned, endPinned, slack });
     }
   });
-  // Placement tiers: pinned (hard) first, then guaranteed (floor), then optional
-  // aspiration occurrences last — so extras only claim slots nothing else needs.
-  // Within a tier: priority desc, then most-constrained (least slack) first, then
-  // subject/id/date for determinism.
-  const tierOf = (it: Item) => (it.pinned ? 0 : it.slot.optional ? 2 : 1);
-  items.sort((a, b) => {
-    const ta = tierOf(a);
-    const tb = tierOf(b);
-    if (ta !== tb) return ta - tb;
-    if (b.intent.priority !== a.intent.priority) return b.intent.priority - a.intent.priority;
-    if (a.slack !== b.slack) return a.slack - b.slack; // most-constrained first
-    if (a.intent.subject !== b.intent.subject) return a.intent.subject.localeCompare(b.intent.subject);
-    const aid = a.intent.id ?? '';
-    const bid = b.intent.id ?? '';
-    if (aid !== bid) return aid.localeCompare(bid);
-    if (a.slot.date !== b.slot.date) return a.slot.date < b.slot.date ? -1 : 1;
-    return a.slot.perDayIndex - b.slot.perDayIndex;
-  });
+  items.sort(orderItems);
 
   // The immovable seed (fixed events) — obstacles for every phase.
   const fixedOccupied: Occupied[] = occupied.slice();
 
   // --- Greedy pass: seed each occurrence at its best (min-overlap) slot. ---
   const placements: Placement[] = [];
-  for (const { intent, slot, pinned, endPinned } of items) {
+  const dropped: Item[] = [];
+  for (const item of items) {
+    const { intent, slot, pinned, endPinned } = item;
     const bp = bestPlacement(slot, intent, config, occupied, origin);
-    // Aspiration (optional) occurrences are placed only when they fit cleanly;
-    // otherwise they are silently dropped (never forced, never a conflict).
-    if (slot.optional && (bp.unsatisfiable || bp.overlapMin > 0)) continue;
+    if (slot.optional && (bp.unsatisfiable || bp.overlapMin > 0)) {
+      dropped.push(item);
+      continue;
+    }
     const placement: Placement = {
       slot,
       intent,
@@ -187,39 +223,60 @@ export function solve(input: SolveInput): SolveOutput {
     }
   }
 
+  return { placements, dropped, fixedOccupied, conflicts, origin };
+}
+
+/**
+ * The full greedy pipeline short of output assembly: construct, then local
+ * repair, then (fillToMax) duration distribution. Placements are mutated in
+ * place; the returned Construction reflects the final arrangement.
+ */
+export function greedyPlacements(input: SolveInput): Construction {
+  const c = constructGreedy(input);
+
   // --- Local search: shift flexible occurrences to remove avoidable overlaps
   // (the "shifts and swaps" pass in the contract). Pinned/fixed never move. ---
-  repair(placements, fixedOccupied, config, origin);
+  repair(c.placements, c.fixedOccupied, input.config, c.origin);
 
   // --- fillToMax: grow flexible DURATIONS to fill a contended window, sharing
   // the slack above the floors by priority. ---
-  if (config.fillToMax) distributeDurations(placements, fixedOccupied, config, origin);
+  if (input.config.fillToMax) distributeDurations(c.placements, c.fixedOccupied, input.config, c.origin);
+
+  return c;
+}
+
+/** Assemble the public SolveOutput from a final arrangement. */
+export function assembleOutput(c: Construction, input: SolveInput): SolveOutput {
+  const conflicts = c.conflicts.slice();
 
   // --- Conflict report: name only the overlaps that actually remain, in the
   // same priority order they were placed (pinned first). ---
-  conflicts.push(...overlapConflicts(placements, fixedOccupied, origin));
+  conflicts.push(...overlapConflicts(c.placements, c.fixedOccupied, c.origin));
 
-  // Build instances.
-  const instances: Instance[] = placements.map((p) => buildInstance(p, config));
+  const instances: Instance[] = c.placements.map((p) => buildInstance(p, input.config));
   instances.sort((a, b) => (a.start < b.start ? -1 : a.start > b.start ? 1 : a.subject.localeCompare(b.subject)));
 
-  const updates = diffUpdates(instances, existing);
+  const updates = diffUpdates(instances, input.existingCalendar ?? []);
 
   return { instances, updates, conflicts };
+}
+
+export function solve(input: SolveInput): SolveOutput {
+  return assembleOutput(greedyPlacements(input), input);
 }
 
 /** The default engine: deterministic greedy seed + local repair. */
 export const greedySolver: Solver = { solve };
 
 /** Occupied interval for a placement, in absolute minutes. */
-function occFor(p: Placement, origin: ISODate): Occupied {
+export function occFor(p: Placement, origin: ISODate): Occupied {
   const startAbs = absoluteMinutes(origin, p.date, p.startMin);
   return { startAbs, endAbs: startAbs + p.durationMin, label: p.intent.subject };
 }
 
 const DAY_END = 1440;
 
-interface BestPlacement {
+export interface BestPlacement {
   date: ISODate;
   startMin: number;
   placedDuringSleep: boolean;
@@ -236,7 +293,7 @@ interface BestPlacement {
  * minimum-overlap slot anywhere in its window/bucket (so a forced overlap is as
  * small as possible). No side effects — the caller decides whether to use it.
  */
-function bestPlacement(
+export function bestPlacement(
   slot: Slot,
   intent: Intent,
   config: GlobalConfig,
@@ -349,7 +406,7 @@ function bestPlacement(
 }
 
 /** Total minutes a candidate [start, start+dur] on a date overlaps obstacles. */
-function overlapAt(occupied: Occupied[], origin: ISODate, date: ISODate, start: number, dur: number): number {
+export function overlapAt(occupied: Occupied[], origin: ISODate, date: ISODate, start: number, dur: number): number {
   const a = absoluteMinutes(origin, date, start);
   const b = a + dur;
   let total = 0;
@@ -363,7 +420,7 @@ function overlapAt(occupied: Occupied[], origin: ISODate, date: ISODate, start: 
  * non-negative integer that drops on every move, so this terminates; the cap is
  * a safety net. Pinned occurrences are never moved.
  */
-function repair(placements: Placement[], fixed: Occupied[], config: GlobalConfig, origin: ISODate): void {
+export function repair(placements: Placement[], fixed: Occupied[], config: GlobalConfig, origin: ISODate): void {
   const MAX_PASSES = 64;
   for (let pass = 0; pass < MAX_PASSES; pass++) {
     let moved = false;
@@ -395,7 +452,7 @@ function repair(placements: Placement[], fixed: Occupied[], config: GlobalConfig
  * already-placed events it collides with — so a forced overlap names the
  * constraints in tension, while avoidable ones (now resolved) raise nothing.
  */
-function overlapConflicts(placements: Placement[], fixed: Occupied[], origin: ISODate): ConflictReport[] {
+export function overlapConflicts(placements: Placement[], fixed: Occupied[], origin: ISODate): ConflictReport[] {
   const conflicts: ConflictReport[] = [];
   const occupied: Occupied[] = fixed.slice();
   for (const p of placements) {
@@ -418,7 +475,7 @@ function overlapConflicts(placements: Placement[], fixed: Occupied[], origin: IS
 }
 
 /** Number of placed occurrences already sitting on a given date. */
-function loadOn(occupied: Occupied[], origin: ISODate, date: ISODate): number {
+export function loadOn(occupied: Occupied[], origin: ISODate, date: ISODate): number {
   const base = absoluteMinutes(origin, date, 0);
   let n = 0;
   for (const o of occupied) if (o.startAbs >= base && o.startAbs < base + 1440) n++;
@@ -433,7 +490,7 @@ function loadOn(occupied: Occupied[], origin: ISODate, date: ISODate): number {
  * into the window's free gaps. A lone flexible occurrence grows in place to fill
  * the free room after it (see `growInPlace`).
  */
-function distributeDurations(placements: Placement[], fixed: Occupied[], config: GlobalConfig, origin: ISODate): void {
+export function distributeDurations(placements: Placement[], fixed: Occupied[], config: GlobalConfig, origin: ISODate): void {
   const grid = Math.max(1, config.grid);
   const byDay = new Map<ISODate, Placement[]>();
   for (const p of placements) {
@@ -573,7 +630,7 @@ function distributeDurations(placements: Placement[], fixed: Occupied[], config:
  * exact limit rather than snapping to grid: a marker-pinned edge (e.g. sunset,
  * bedtime) is off-grid, and snapping would strand a few minutes below the max.
  */
-function growInPlace(
+export function growInPlace(
   p: Placement,
   date: ISODate,
   placements: Placement[],
@@ -637,7 +694,7 @@ function growInPlace(
 }
 
 /** Free [start,end] gaps inside [ws,we] once the obstacles are removed. */
-function freeIntervals(ws: number, we: number, obstacles: Array<[number, number]>): Array<[number, number]> {
+export function freeIntervals(ws: number, we: number, obstacles: Array<[number, number]>): Array<[number, number]> {
   const sorted = [...obstacles].sort((a, b) => a[0] - b[0]);
   const out: Array<[number, number]> = [];
   let cursor = ws;
@@ -651,7 +708,7 @@ function freeIntervals(ws: number, we: number, obstacles: Array<[number, number]
 }
 
 /** Subtract the nightly sleep blackout from [lo, hi]; null when no trim needed. */
-function trimBySleep(
+export function trimBySleep(
   lo: number,
   hi: number,
   duration: number,
@@ -669,7 +726,7 @@ function trimBySleep(
   return null; // sleep yields: keep the original (discretion impossible)
 }
 
-function isInSleep(start: number, duration: number, date: ISODate, config: GlobalConfig): boolean {
+export function isInSleep(start: number, duration: number, date: ISODate, config: GlobalConfig): boolean {
   const { sleepStart, wakeStart } = resolveSleepBlackout(date, config);
   const end = start + duration;
   // Overlaps morning blackout [0, wakeStart) or evening [sleepStart, 1440+).
@@ -678,7 +735,7 @@ function isInSleep(start: number, duration: number, date: ISODate, config: Globa
   return false;
 }
 
-function findFreeStart(
+export function findFreeStart(
   lo: number,
   hi: number,
   duration: number,
@@ -699,7 +756,7 @@ function findFreeStart(
   return null;
 }
 
-function overlapsAny(
+export function overlapsAny(
   startAbs: number,
   endAbs: number,
   occupied: Occupied[],
@@ -711,7 +768,7 @@ function overlapsAny(
   return false;
 }
 
-function buildInstance(p: Placement, config: GlobalConfig): Instance {
+export function buildInstance(p: Placement, config: GlobalConfig): Instance {
   const start = toISODateTime(p.date, p.startMin);
   const end = toISODateTime(p.date, p.startMin + p.durationMin);
   const instance: Instance = {
@@ -736,7 +793,7 @@ function buildInstance(p: Placement, config: GlobalConfig): Instance {
 }
 
 /** Compute the create/update/delete/unchanged set against the prior calendar. */
-function diffUpdates(instances: Instance[], existing: CalendarEvent[]): Update[] {
+export function diffUpdates(instances: Instance[], existing: CalendarEvent[]): Update[] {
   const updates: Update[] = [];
   const prevByUid = new Map<string, CalendarEvent>();
   for (const ev of existing) {
@@ -763,6 +820,6 @@ function diffUpdates(instances: Instance[], existing: CalendarEvent[]): Update[]
   return updates;
 }
 
-function ceilTo(value: number, step: number): number {
+export function ceilTo(value: number, step: number): number {
   return Math.ceil(value / step) * step;
 }
