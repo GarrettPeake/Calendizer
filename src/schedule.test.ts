@@ -6,6 +6,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { assembleSchedule, AssembleInput } from './schedule';
 import { GlobalConfig, Instance, Intent } from './types';
+import { weekdayCode } from './time';
 
 const config: GlobalConfig = {
   wakeup: '07:00',
@@ -43,7 +44,17 @@ test('a live daily intent produces future occurrences and no reaping', () => {
   const r = assembleSchedule(base({ intents: [dailyIntent()] }));
   assert.ok(r.instances.length > 0);
   assert.equal(r.reapedIntentIds.length, 0);
-  assert.equal(r.horizon.end, '2027-07-01'); // today + 365
+  // today + 365 = 2027-07-01 (a Thursday), extended to the Sunday closing that
+  // ISO week so the final week's buckets are whole (a midweek cutoff crams
+  // weekly floors into a partial week and manufactures conflicts).
+  assert.equal(r.horizon.end, '2027-07-04');
+});
+
+test('the horizon end always lands on a Sunday (whole final week)', () => {
+  for (const days of [300, 330, 365, 400]) {
+    const r = assembleSchedule(base({ intents: [dailyIntent()], horizonDays: days }));
+    assert.equal(weekdayCode(r.horizon.end), 'SU', `horizonDays=${days} → ${r.horizon.end}`);
+  }
 });
 
 test('a fully-passed one-off intent is reaped', () => {

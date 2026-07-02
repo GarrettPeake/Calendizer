@@ -279,6 +279,38 @@ function analyzeWeek(
     }
   }
 
+  // Same-intent DAY DOUBLING: greedy's expansion picks extra days before the
+  // solve, so a spilled floor can end up sharing a day with an extra (the
+  // "two Park times on Saturday" bug). Per_day stacks (same slot.date) share
+  // their day by design; anything else on one date is contention — mark all
+  // participants hot so phase A can pull them apart.
+  {
+    const byIntentDay = new Map<string, Item[]>();
+    for (const item of movable) {
+      const p = placedByUid.get(item.slot.uid);
+      if (!p) continue;
+      const k = `${item.slot.intentId}|${p.date}`;
+      const arr = byIntentDay.get(k) ?? [];
+      arr.push(item);
+      byIntentDay.set(k, arr);
+    }
+    const doubledIntents = new Set<string>();
+    for (const group of byIntentDay.values()) {
+      if (group.length < 2) continue;
+      const stackDate = group[0].slot.date;
+      if (group.every((i) => i.slot.date === stackDate)) continue; // per_day stack
+      doubledIntents.add(group[0].slot.intentId);
+      needsMip = true;
+      contention = true;
+    }
+    // The whole intent is one coupled system: every one of its occurrences
+    // (not just the doubled pair) needs day mobility, or a cold sibling can
+    // block the only clean rearrangement.
+    for (const item of movable) {
+      if (doubledIntents.has(item.slot.intentId)) hot.add(item.slot.uid);
+    }
+  }
+
   // Raw overlap / padding shortfall involving at least one movable participant.
   const movableUids = new Set(movable.map((i) => i.slot.uid));
   const weekPlaced = items

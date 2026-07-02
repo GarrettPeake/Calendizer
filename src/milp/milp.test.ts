@@ -143,6 +143,39 @@ test('optionals are never forced: fillToMax extras appear only in clean slots', 
   assert.equal(overlapMinutes(m.instances), 0);
 });
 
+test('same-intent occurrences never share a day (the "two Park times on Saturday" bug)', () => {
+  const cfg: GlobalConfig = { ...CONFIG, wakeup: '08:00', sleep: '23:30', fillToMax: true, utcOffsetMinutes: -420 };
+  // Work blocks weekdays; Park's floors spill onto the weekend where the
+  // fillToMax extras were natively dated — greedy stacks two on Saturday.
+  const intents = [
+    intent('Work', {
+      priority: 95,
+      duration: [480, 480],
+      window: { starts_at: '09:00' },
+      cardinality: { period: { unit: 'day' }, days: { weekdays: ['MO', 'TU', 'WE', 'TH', 'FR'] } },
+      id: 'work',
+    }),
+    intent('Park time', {
+      priority: 55,
+      duration: [75, 75],
+      window: { not_before: '11:30', not_after: '17:00' },
+      cardinality: { period: { unit: 'week' }, days: { count: [2, 4] } },
+      id: 'park',
+    }),
+  ];
+  const input = inputOf(intents, cfg);
+  const g = solve(input);
+  const daysOf = (out: { instances: Instance[] }) => out.instances.filter((i) => i.subject === 'Park time').map((i) => i.date);
+  const gDays = daysOf(g);
+  assert.ok(new Set(gDays).size < gDays.length, 'premise: greedy doubles a day'); // the gap being pinned
+  const m = createMilpSolver(highs).solve(input);
+  const mDays = daysOf(m);
+  assert.equal(new Set(mDays).size, mDays.length, `milp doubled: ${mDays.join(',')}`);
+  assert.ok(mDays.length >= 2); // floors always place
+  assert.equal(m.conflicts.length, 0);
+  assert.equal(overlapMinutes(m.instances), 0);
+});
+
 test('duration growth: milp fills toward max at least as well as greedy', () => {
   const cfg: GlobalConfig = { ...CONFIG, fillToMax: true };
   const intents = [

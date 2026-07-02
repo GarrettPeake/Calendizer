@@ -59,7 +59,10 @@ export function assembleSchedule(input: AssembleInput): AssembleResult {
   const horizonDays = input.horizonDays ?? 365;
   const retentionDays = input.retentionDays ?? 90;
 
-  const end = addDays(today, horizonDays);
+  // Align the horizon END to an ISO-week boundary (the start already is, via
+  // alignHorizonStart): a raw +365d end cuts the final week short, cramming its
+  // weekly floors into the few remaining days and manufacturing conflicts.
+  const end = addDays(startOfISOWeek(addDays(today, horizonDays)), 6);
   const retentionStart = addDays(today, -retentionDays);
 
   // The frozen set is the immutable PAST only: `overlay` keeps all of it verbatim,

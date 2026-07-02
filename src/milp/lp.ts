@@ -176,6 +176,7 @@ export function buildWeekModel(input: BuildInput): WeekModel {
   const decode: OccurrenceVars[] = [];
 
   const ovTerms = new Map<string, number>();
+  const dblTerms = new Map<string, number>();
   const sleepTerms = new Map<string, number>();
   const psTerms = new Map<string, number>();
   const optTerms = new Map<string, number>();
@@ -595,7 +596,19 @@ export function buildWeekModel(input: BuildInput): WeekModel {
     });
   });
 
-  // --- Day-exclusivity by intentId. ---
+  // --- Day-exclusivity by intentId, keyed by POSSIBLE RESIDENCY (candidate
+  // days), not slot.date: a cold occurrence greedy spilled onto another day is
+  // just as much an occupant of that day as a native — classifying by slot.date
+  // alone let a mobile occurrence join a spilled sibling's day (the "two Park
+  // times on Saturday" bug). Rules per (intent, day d):
+  //   - the per_day stack (slot.date === d) coexists freely with itself;
+  //   - at most ONE non-stack occurrence may reside on d;
+  //   - a non-stack occurrence never joins a day any other same-intent
+  //     occurrence is FIXED on, and never coexists with a stack member.
+  // The rules are SOFT — violated by a shared slack `xv` that its own
+  // lexicographic tier (right after overlap) drives to zero. Hard rows would
+  // make greedy's doubled seeds infeasible, and the never-worse guard would
+  // then reject every honest fix as "worse than the seed".
   const byIntent = new Map<string, number[]>();
   occ.forEach((o, oi) => {
     const arr = byIntent.get(o.item.slot.intentId) ?? [];
@@ -606,30 +619,59 @@ export function buildWeekModel(input: BuildInput): WeekModel {
     if (indices.length < 2) continue;
     const allDays = new Set<ISODate>();
     for (const oi of indices) for (const d of occ[oi].days) allDays.add(d);
+    let xvN = 0;
     for (const d of [...allDays].sort()) {
-      const movers = indices.filter(
-        (oi) => occ[oi].item.slot.date !== d && occ[oi].days.includes(d) && decode[oi].aVars.length > 0
-      );
-      if (movers.length === 0) continue;
-      const natives = indices.filter((oi) => occ[oi].item.slot.date === d && occ[oi].days.includes(d));
+      const entries = indices.filter((oi) => occ[oi].days.includes(d));
+      if (entries.length < 2) continue;
+      const isSib = (oi: number) => occ[oi].item.slot.date === d; // native per_day stack
+      const isFixed = (oi: number) => decode[oi].aVars.length === 0; // resident, immovable
+      const others = entries.filter((oi) => !isSib(oi));
+      const mobileOthers = others.filter((oi) => !isFixed(oi));
+      const anyFixedResident = entries.some((oi) => isFixed(oi));
+      const mobileSibs = entries.filter((oi) => isSib(oi) && !isFixed(oi));
+      if (mobileOthers.length === 0) continue;
       const dTag = d.replace(/-/g, '');
-      if (movers.length > 1) {
+      const presOf = (oi: number) => `a${oi}_${occ[oi].days.indexOf(d)}`;
+      const presentAtSeed = (oi: number) => (occ[oi].seed ? occ[oi].seed!.date === d : false);
+
+      const xv = `xv_${slug(intentId)}_${xvN++}`;
+      const w = (occ[indices[0]].item.intent.priority ?? 0) + 1;
+      let used = false;
+      let xvSeed = 0;
+
+      // At most one mobile non-stack occurrence on d.
+      if (mobileOthers.length > 1) {
         const lin = new Lin();
-        for (const oi of movers) lin.add(1, `a${oi}_${occ[oi].days.indexOf(d)}`);
+        for (const oi of mobileOthers) lin.add(1, presOf(oi));
+        lin.add(-1, xv);
         constraints.push(`xm_${slug(intentId)}_${dTag}: ${lin.cmp('<=', 1)}`);
+        used = true;
+        xvSeed = Math.max(xvSeed, mobileOthers.filter(presentAtSeed).length - 1);
       }
-      for (const mo of movers) {
-        for (const no of natives) {
-          const noPres = presence(no, occ[no].days.indexOf(d));
-          const lin = new Lin().add(1, `a${mo}_${occ[mo].days.indexOf(d)}`);
-          if (noPres) {
-            lin.add(1, noPres);
-            constraints.push(`xn_${slug(intentId)}_${dTag}_${mo}_${no}: ${lin.cmp('<=', 1)}`);
-          } else {
-            // Native is fixed-present on d: the mover may never take d.
-            constraints.push(`xn_${slug(intentId)}_${dTag}_${mo}_${no}: ${lin.cmp('<=', 0)}`);
-          }
+      for (const mo of mobileOthers) {
+        if (anyFixedResident) {
+          // Someone (spilled sibling or stack) is fixed on d — joining costs xv.
+          constraints.push(`xf_${slug(intentId)}_${dTag}_${mo}: ${new Lin().add(1, presOf(mo)).add(-1, xv).cmp('<=', 0)}`);
+          used = true;
+          if (presentAtSeed(mo)) xvSeed = Math.max(xvSeed, 1);
+          continue;
         }
+        // Mutually exclusive with each (mobile) stack member.
+        for (const s of mobileSibs) {
+          constraints.push(
+            `xn_${slug(intentId)}_${dTag}_${mo}_${s}: ${new Lin().add(1, presOf(mo)).add(1, presOf(s)).add(-1, xv).cmp('<=', 1)}`
+          );
+          used = true;
+          if (presentAtSeed(mo) && presentAtSeed(s)) xvSeed = Math.max(xvSeed, 1);
+        }
+      }
+      if (used) {
+        bounds.push(`0 <= ${xv} <= ${entries.length}`);
+        generals.push(xv);
+        dblTerms.set(xv, w);
+        seedValues.set(xv, xvSeed);
+      } else {
+        xvN--;
       }
     }
   }
@@ -681,6 +723,9 @@ export function buildWeekModel(input: BuildInput): WeekModel {
     phase === 'week'
       ? [
           { name: 'overlap', terms: ovTerms, ideal: 0 },
+          // Same-intent day doubling — a correctness rule, so it outranks
+          // everything below overlap (dropping an extra beats doubling a day).
+          { name: 'daydouble', terms: dblTerms, ideal: 0 },
           { name: 'sleep', terms: sleepTerms, ideal: 0 },
           { name: 'padding', terms: psTerms, ideal: 0 },
           // Placement of aspirational extras is a maximization with the same
