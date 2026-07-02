@@ -49,11 +49,19 @@ export function SolveOverlay({ phase, progress, intents }: { phase: OverlayPhase
   }, [phase]);
 
   const done = phase !== 'solving';
+  const text = done ? 'Solved' : message;
+  // Per-letter staggered rise: the first letters land before the last, left to
+  // right. The success beat is short, so "Solved" cascades tighter and faster.
+  const stagger = done ? 12 : 16;
   return (
     <div className={`solve-overlay ${phase}`}>
       <div className="solve-box">
         <div key={done ? 'solved' : msgKey} className={`solve-msg${done ? ' solved' : ''}`}>
-          {done ? 'Solved' : message}
+          {[...text].map((ch, i) => (
+            <span key={i} className="solve-ch" style={{ animationDelay: `${i * stagger}ms` }}>
+              {ch === ' ' ? ' ' : ch}
+            </span>
+          ))}
         </div>
         {done ? (
           <svg className="solve-check" viewBox="0 0 24 24" width="34" height="34" aria-hidden>
