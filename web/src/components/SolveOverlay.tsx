@@ -85,9 +85,15 @@ export function SolveOverlay({ phase, progress, intents }: { phase: OverlayPhase
             <path d="M4 12.5 L10 18.5 L20 6.5" fill="none" stroke="#fff" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
         ) : (
-          <div className="solve-track">
-            <div className="solve-fill" style={{ width: `${Math.round(progress * 100)}%` }} />
-          </div>
+          <>
+            <div className="solve-track">
+              <div className="solve-fill" style={{ width: `${Math.round(progress * 100)}%` }} />
+            </div>
+            <p className="solve-caption">
+              We're taking your intents and creating an actual calendar. This takes a bit because the more you're
+              trying to cram in, the harder it is to solve, but the result will be worth it!
+            </p>
+          </>
         )}
       </div>
     </div>

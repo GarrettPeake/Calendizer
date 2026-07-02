@@ -474,3 +474,13 @@ label.field span { display: block; margin-bottom: 3px; }
   from { transform: scale(0.4); opacity: 0; }
   to { transform: scale(1); opacity: 1; }
 }
+.solve-caption {
+  /* Static explainer under the bar — never wider than the bar itself. */
+  width: 260px;
+  margin: 0;
+  text-align: center;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: rgba(255, 255, 255, 0.82);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
