@@ -198,7 +198,7 @@ label.field span { display: block; margin-bottom: 3px; }
 .conflict-banner ul { margin: 4px 0 0; padding-left: 18px; }
 
 /* ---------------- Week grid ---------------- */
-.cal-scroll { flex: 1; overflow: auto; background: var(--panel); }
+.cal-scroll { flex: 1; min-height: 0; overflow: auto; background: var(--panel); }
 .cal-head {
   display: grid; grid-template-columns: 56px repeat(7, 1fr);
   position: sticky; top: 0; z-index: 3; background: var(--panel);
@@ -391,7 +391,19 @@ label.field span { display: block; margin-bottom: 3px; }
 
 /* ---------------- solve overlay (worker progress + success beat) ---------------- */
 .cal-stage {
+  /* Fills whatever height the toolbar/banners leave in .main — the calendar
+     squishes and scrolls internally rather than pushing past the viewport. */
   position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.cal-fill {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 .cal-reveal {
   animation: calReveal 100ms ease-out;
@@ -404,7 +416,9 @@ label.field span { display: block; margin-bottom: 3px; }
   position: absolute;
   inset: 0;
   z-index: 30;
-  display: block;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   border-radius: 12px;
   background: rgba(55, 60, 72, 0.62);
   backdrop-filter: blur(1.5px);
@@ -419,11 +433,6 @@ label.field span { display: block; margin-bottom: 3px; }
   pointer-events: none;
 }
 .solve-box {
-  /* The grid under the veil is ~1440px tall — stick the box to the VISIBLE
-     viewport rather than centering in the full scroll height. */
-  position: sticky;
-  top: 38vh;
-  margin: 0 auto;
   width: fit-content;
   display: flex;
   flex-direction: column;

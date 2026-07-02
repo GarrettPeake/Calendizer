@@ -495,7 +495,7 @@ export function App() {
         ) : null}
 
         <div className="cal-stage">
-          <div className={overlay?.phase === 'fadeout' ? 'cal-reveal' : undefined}>
+          <div className={overlay?.phase === 'fadeout' ? 'cal-fill cal-reveal' : 'cal-fill'}>
             <WeekCalendar
               days={days}
               fixed={NO_FIXED}
