@@ -20,12 +20,15 @@ import { assembleSchedule, createMilpSolver, type AssembleInput, type MilpMemo, 
  * page loads, so a reload's re-solve is warm (seconds) instead of cold
  * (minutes on schedules with structurally-forced conflicts, where every
  * week's overlap optimum is nonzero and expensive to prove). Keys are the
- * FULL model text — identical key ⇒ identical model ⇒ identical solution —
- * so a stale cache can never produce a wrong schedule, only a slower one.
- * Bump MEMO_VERSION when solver/model semantics change to discard old
- * entries wholesale.
+ * FULL model text PLUS the seed — stages are bounded searches, so the result
+ * is a deterministic function of (model, seed), and only that pair may be
+ * replayed. Null entries ("solve failed, keep the seed") are kept in-memory
+ * for the session but never persisted: an environment-transient failure
+ * (WASM hiccup, memory pressure) must not pin a week to its greedy seed
+ * forever. Bump MEMO_VERSION when solver/model semantics change to discard
+ * old entries wholesale.
  */
-const MEMO_VERSION = 1;
+const MEMO_VERSION = 2; // v2: seed folded into the key; nulls no longer persisted
 const DB_NAME = 'calendizer-solver';
 const STORE = 'memo';
 
@@ -47,7 +50,7 @@ function openDb(): Promise<IDBDatabase | null> {
   });
 }
 
-type MemoEntry = [string, Array<[string, number]> | null];
+type MemoEntry = [string, Array<[string, number]>];
 
 async function loadMemo(memo: MilpMemo): Promise<void> {
   const db = await openDb();
@@ -58,7 +61,7 @@ async function loadMemo(memo: MilpMemo): Promise<void> {
       const req = tx.objectStore(STORE).get('entries');
       req.onsuccess = () => {
         const entries = (req.result as MemoEntry[] | undefined) ?? [];
-        for (const [k, v] of entries) memo.set(k, v === null ? null : new Map(v));
+        for (const [k, v] of entries) if (v !== null) memo.set(k, new Map(v));
         resolve();
       };
       req.onerror = () => resolve();
@@ -72,7 +75,10 @@ async function loadMemo(memo: MilpMemo): Promise<void> {
 async function saveMemo(memo: MilpMemo): Promise<void> {
   const db = await openDb();
   if (!db) return;
-  const entries: MemoEntry[] = [...memo.entries()].map(([k, v]) => [k, v === null ? null : [...v.entries()]]);
+  // Persist only real solutions — null ("keep seed") verdicts stay in-memory.
+  const entries: MemoEntry[] = [...memo.entries()]
+    .filter(([, v]) => v !== null)
+    .map(([k, v]) => [k, [...(v as Map<string, number>).entries()]]);
   await new Promise<void>((resolve) => {
     try {
       const tx = db.transaction(STORE, 'readwrite');

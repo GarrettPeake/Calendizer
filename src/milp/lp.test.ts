@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildWeekModel, WeekOccurrence } from './lp';
+import { memoKey } from './milpSolver';
 import { Item } from '../solver';
 import { GlobalConfig, Intent } from '../types';
 
@@ -192,6 +193,28 @@ test('habit: |s − h| rows appear only with a target; gated for optionals', () 
   assert.ok(model.constraints.includes('haA0: + 1 hab0 - 1 s0 >= -600'));
   assert.ok(model.constraints.includes('haB0: + 1 hab0 + 1 s0 >= 600'));
   assert.ok(model.stages.some((s) => s.name === 'habit'));
+});
+
+test('memoKey folds in the seed: identical model text, different seed ⇒ different key', () => {
+  // Stages are BOUNDED searches (node caps, improving-sols caps, the
+  // never-worse-than-seed guard), so a cached result is a function of
+  // (model, seed) — replaying a solution reached from a different seed can
+  // silently pin a schedule below what the current seed would achieve.
+  const item = makeItem({ subject: 'walk', duration: [60, 90], window: { not_before: '09:00', not_after: '19:00' } });
+  const model = (startMin: number) =>
+    buildWeekModel({
+      occ: [{ ...occOf(item), seed: { date: '2026-07-07', startMin, durationMin: 60 } }],
+      obstacles: [],
+      config: { ...CONFIG, fillToMax: true },
+      habit: new Map(),
+      phase: 'day',
+    });
+  const a = model(540);
+  const b = model(600);
+  assert.deepEqual(a.constraints, b.constraints); // premise: the model text is identical
+  assert.deepEqual(a.bounds, b.bounds);
+  assert.notEqual(memoKey(a), memoKey(b));
+  assert.equal(memoKey(a), memoKey(model(540)));
 });
 
 test('obstacle: tight bounds and both directions when the window strides it', () => {

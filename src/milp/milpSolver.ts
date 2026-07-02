@@ -749,13 +749,21 @@ function buildObstacles(
   return out;
 }
 
-function memoKey(model: WeekModel): string {
+export function memoKey(model: WeekModel): string {
   return [
     model.constraints.join('\n'),
     model.bounds.join('\n'),
     model.generals.join(' '),
     model.binaries.join(' '),
     model.stages.map((s) => s.name + ':' + [...s.terms.entries()].map(([k, v]) => `${k}=${v}`).join(',')).join(';'),
+    // The SEED is part of the key: stages are bounded searches (node caps,
+    // improving-sols caps, never-worse-than-seed guard), so the result is a
+    // deterministic function of (model, seed) — NOT of the model alone. An
+    // edit elsewhere in the week can leave this model's text identical while
+    // changing the seed; replaying a solution reached from a worse seed would
+    // pin the schedule to that worse answer forever (the "Watch sunset never
+    // shrinks" bug).
+    [...model.seedValues.entries()].map(([k, v]) => `${k}=${v}`).join(','),
   ].join('#');
 }
 
