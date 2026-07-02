@@ -295,31 +295,74 @@ export function buildWeekModel(input: BuildInput): WeekModel {
     }
 
     // Sleep intrusion (skip pinned: their intrusion is fate, a constant).
+    // Each blackout side contributes min(d, boundary distance): the plain
+    // linear form (m ≥ wake − s) is exact while the event can only STRADDLE
+    // the boundary, but overcounts an event that can sit FULLY inside the
+    // blackout — which manufactures a phantom "later is better" gradient
+    // (an aurora watch would drift toward wakeup). Where full-inside is
+    // reachable, a cap binary y picks min(d, ·).
     if (!it.pinned) {
-      const admits = dayCtx[oi].some((dc) => dc.nb < dc.wake || dc.na > dc.sleep);
-      if (admits) {
-        const mVar = `m${oi}`;
-        bounds.push(`0 <= ${mVar} <= 2880`);
-        const slA = new Lin().add(1, mVar).add(1, sVar);
-        const slB = new Lin().add(1, mVar).add(-1, sVar).add(-1, dVar);
-        if (needsA) {
-          dayCtx[oi].forEach((dc, k) => {
-            slA.add(-dc.wake, aVars[k].name);
-            slB.add(dc.sleep, aVars[k].name);
-          });
-          constraints.push(`slA${oi}: ${slA.cmp('>=', 0)}`);
-          constraints.push(`slB${oi}: ${slB.cmp('>=', 0)}`);
+      const morningSide = dayCtx[oi].some((dc) => dc.nb < dc.wake);
+      const eveningSide = dayCtx[oi].some((dc) => dc.na > dc.sleep);
+      const sideVars: string[] = [];
+      if (morningSide) {
+        const mVar = `ma${oi}`;
+        sideVars.push(mVar);
+        const fullInside = dayCtx[oi].some((dc) => dc.nb + dMin < dc.wake - 0);
+        const lin = new Lin().add(1, mVar).add(1, sVar);
+        let rhs = 0;
+        if (needsA) dayCtx[oi].forEach((dc, k) => lin.add(-dc.wake, aVars[k].name));
+        else rhs = dayCtx[oi][0].wake;
+        if (fullInside && dayCtx[oi].some((dc) => dc.nb + dMin < dc.wake)) {
+          const y = `ya${oi}`;
+          binaries.push(y);
+          const maxWake = Math.max(...dayCtx[oi].map((dc) => dc.wake));
+          lin.add(maxWake, y); // y=1 relaxes the straddle form...
+          constraints.push(`slA${oi}: ${lin.cmp('>=', rhs)}`);
+          // ...and activates the cap: m ≥ d − dHi·(1−y).
+          constraints.push(`slAc${oi}: ${new Lin().add(1, mVar).add(-1, dVar).add(-dHi, y).cmp('>=', -dHi)}`);
+          seedValues.set(y, 0);
         } else {
-          const dc = dayCtx[oi][0];
-          constraints.push(`slA${oi}: ${slA.cmp('>=', dc.wake)}`);
-          constraints.push(`slB${oi}: ${slB.cmp('>=', -dc.sleep)}`);
+          constraints.push(`slA${oi}: ${lin.cmp('>=', rhs)}`);
         }
+      }
+      if (eveningSide) {
+        const mVar = `mb${oi}`;
+        sideVars.push(mVar);
+        const lin = new Lin().add(1, mVar).add(-1, sVar).add(-1, dVar);
+        let rhs = 0;
+        if (needsA) dayCtx[oi].forEach((dc, k) => lin.add(dc.sleep, aVars[k].name));
+        else rhs = -dayCtx[oi][0].sleep;
+        const fullInside = dayCtx[oi].some((dc) => dc.sleep + dMin <= dc.na);
+        if (fullInside) {
+          const y = `yb${oi}`;
+          binaries.push(y);
+          const span = 2880;
+          lin.add(span, y);
+          constraints.push(`slB${oi}: ${lin.cmp('>=', rhs)}`);
+          constraints.push(`slBc${oi}: ${new Lin().add(1, mVar).add(-1, dVar).add(-dHi, y).cmp('>=', -dHi)}`);
+          seedValues.set(y, 0);
+        } else {
+          constraints.push(`slB${oi}: ${lin.cmp('>=', rhs)}`);
+        }
+      }
+      for (const mVar of sideVars) {
+        bounds.push(`0 <= ${mVar} <= 2880`);
         sleepTerms.set(mVar, w);
+      }
+      if (sideVars.length > 0) {
         if (seed) {
           const dc = dayCtx[oi][o.days.indexOf(seed.date)];
-          seedValues.set(mVar, Math.max(0, dc.wake - seed.startMin, seed.startMin + seed.durationMin - dc.sleep));
+          const morning = Math.min(seed.durationMin, Math.max(0, dc.wake - seed.startMin));
+          const evening = Math.min(seed.durationMin, Math.max(0, seed.startMin + seed.durationMin - dc.sleep));
+          if (morningSide) seedValues.set(`ma${oi}`, morning);
+          if (eveningSide) seedValues.set(`mb${oi}`, evening);
+          // Seed cap binaries consistently with the seed intrusion.
+          if (morningSide && seedValues.has(`ya${oi}`)) seedValues.set(`ya${oi}`, dc.wake - seed.startMin >= seed.durationMin ? 1 : 0);
+          if (eveningSide && seedValues.has(`yb${oi}`)) seedValues.set(`yb${oi}`, seed.startMin >= dc.sleep ? 1 : 0);
         } else {
-          seedValues.set(mVar, 0);
+          if (morningSide) seedValues.set(`ma${oi}`, 0);
+          if (eveningSide) seedValues.set(`mb${oi}`, 0);
         }
       }
     }

@@ -5,8 +5,15 @@
  * horizon, runs the deterministic solver, and exposes query helpers used by the
  * shared step definitions. Feature authors NEVER write step definitions — they
  * write `.feature` files against the vocabulary in features/step_definitions.
+ *
+ * Solver selection: scenarios run against the DEFAULT solver (the MIP,
+ * `createMilpSolver`) unless tagged `@greedy`, which pins the legacy greedy
+ * engine. Greedy-tagged scenarios encode the exact placement contract of the
+ * old solver (earliest-fit tables under contention); untagged scenarios state
+ * behaviour both engines must satisfy — plus whatever the optimizer does
+ * strictly better.
  */
-import { setWorldConstructor, World, IWorldOptions } from '@cucumber/cucumber';
+import { setWorldConstructor, World, IWorldOptions, BeforeAll, Before } from '@cucumber/cucumber';
 import {
   GlobalConfig,
   Intent,
@@ -17,7 +24,16 @@ import {
   ConflictReport,
   Update,
 } from '../../src/types';
-import { solve } from '../../src/solver';
+import { solve, Solver } from '../../src/solver';
+import { createMilpSolver } from '../../src/milp/milpSolver';
+
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const loadHighs = require('highs');
+
+let milpSolver: Solver | null = null;
+BeforeAll(async function () {
+  milpSolver = createMilpSolver(await loadHighs());
+});
 
 export const DEFAULT_CONFIG: GlobalConfig = {
   wakeup: '07:00',
@@ -44,19 +60,22 @@ export class CalendizerWorld extends World {
   existing: CalendarEvent[] = [];
   horizon: { start: string; end: string } = { start: '2026-01-01', end: '2026-01-07' };
   output: SolveOutput | null = null;
+  /** Set by the @greedy tag: pin this scenario to the legacy greedy engine. */
+  useGreedy = false;
 
   constructor(options: IWorldOptions) {
     super(options);
   }
 
   run(): void {
-    this.output = solve({
+    const input = {
       config: this.config,
       intents: this.intents,
       modes: this.modes,
       existingCalendar: this.existing,
       horizon: this.horizon,
-    });
+    };
+    this.output = this.useGreedy || !milpSolver ? solve(input) : milpSolver.solve(input);
   }
 
   ensureSolved(): SolveOutput {
@@ -114,3 +133,9 @@ export class CalendizerWorld extends World {
 }
 
 setWorldConstructor(CalendizerWorld);
+
+Before(function (this: CalendizerWorld, { pickle }) {
+  // CAL_FORCE_GREEDY=1 runs the WHOLE suite against the greedy engine (A/B
+  // sanity: the coordination features are expected to fail there).
+  this.useGreedy = pickle.tags.some((t) => t.name === '@greedy') || !!process.env.CAL_FORCE_GREEDY;
+});

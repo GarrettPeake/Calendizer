@@ -107,6 +107,11 @@ Feature: Filling flexible counts toward their max (fillToMax)
     Then there are 3 occurrences of "gym"
     And every occurrence of "gym" falls on a weekday in "MO,WE,FR"
 
+  # @greedy: enshrines the greedy engine's exact split order (higher priority
+  # first at the window start). The optimizer keeps the same durations but may
+  # order the pair differently (weighted earliness moves the LONG event later),
+  # which is equally clean.
+  @greedy
   Scenario: Two flexible-duration tasks split a contended hour by priority
     Given fill toward max is enabled
     When I add the intents:

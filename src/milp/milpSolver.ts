@@ -42,10 +42,14 @@ export interface MilpDebugSink {
 }
 
 export function createMilpSolver(highs: HighsInstance, debug?: MilpDebugSink): Solver {
+  // Model-content-addressed memo, persistent ACROSS solves on this instance:
+  // an edit re-solves only the weeks whose models actually changed; every
+  // untouched week is a cache hit. Safe because the key is the full model.
+  const memo = new Map<string, Map<string, number> | null>();
   return {
     solve(input: SolveInput): SolveOutput {
       const c = greedyPlacements(input);
-      solveWeeks(highs, c, input, debug);
+      solveWeeks(highs, c, input, memo, debug);
       return assembleOutput(c, input);
     },
   };
@@ -54,7 +58,13 @@ export function createMilpSolver(highs: HighsInstance, debug?: MilpDebugSink): S
 /** Model-size safety valve: beyond this many rows, keep the greedy week. */
 const MAX_ROWS = 30000;
 
-function solveWeeks(highs: HighsInstance, c: Construction, input: SolveInput, debug?: MilpDebugSink): void {
+function solveWeeks(
+  highs: HighsInstance,
+  c: Construction,
+  input: SolveInput,
+  memo: Map<string, Map<string, number> | null>,
+  debug?: MilpDebugSink
+): void {
   const config = input.config;
   const placedByUid = new Map<string, Placement>(c.placements.map((p) => [p.slot.uid, p]));
   const droppedUids = new Set(c.dropped.map((i) => i.slot.uid));
@@ -97,8 +107,6 @@ function solveWeeks(highs: HighsInstance, c: Construction, input: SolveInput, de
     return out;
   };
 
-  // Memo: identical week models (weekly-periodic schedules) solve once.
-  const memo = new Map<string, Map<string, number> | null>();
 
   // Week-to-week solution translation: the previous week's solved arrangement,
   // keyed by (intentId, perDayIndex, weekday), proposed as this week's seed.
@@ -362,10 +370,16 @@ function tryAdoptTemplate(
     const rw = resolveWindow(item.intent.window, date, config);
     const [dMin, dMax] = item.intent.duration;
     const dCap = config.fillToMax ? dMax : dMin;
-    if (t.durationMin < dMin || t.durationMin > dCap) { dbgAdopt('duration', item.slot.uid); return none; }
     if (t.startMin % grid !== 0) { dbgAdopt('grid', item.slot.uid); return none; }
-    if (t.startMin < rw.notBefore || t.startMin + t.durationMin > rw.notAfter) { dbgAdopt('window', `${item.slot.uid} s=${t.startMin} d=${t.durationMin} nb=${rw.notBefore} na=${rw.notAfter}`); return none; }
-    proposals.push({ item, pos: { date, startMin: t.startMin, durationMin: t.durationMin } });
+    // Windows drift week to week (solar markers): CLAMP the proposal into the
+    // new window rather than aborting — the H comparison below still gates
+    // adoption, so a clamp that lands on a neighbour loses fairly.
+    let dur = Math.max(dMin, Math.min(t.durationMin, dCap, rw.notAfter - rw.notBefore));
+    if (dur < dMin) { dbgAdopt('duration', item.slot.uid); return none; }
+    let s = Math.min(t.startMin, Math.floor((rw.notAfter - dur) / grid) * grid);
+    s = Math.max(s, Math.ceil(rw.notBefore / grid) * grid);
+    if (s < rw.notBefore || s + dur > rw.notAfter) { dbgAdopt('window', `${item.slot.uid} s=${s} d=${dur} nb=${rw.notBefore} na=${rw.notAfter}`); return none; }
+    proposals.push({ item, pos: { date, startMin: s, durationMin: dur } });
   }
 
   // Day-exclusivity: no two same-intent occurrences on one date unless both native.

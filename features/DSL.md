@@ -10,6 +10,32 @@ assertions must match the documented behaviour below exactly.
 
 ---
 
+## 0. Two solvers, one tag
+
+Untagged scenarios run against the **default solver** — a per-week MIP optimizer
+(HiGHS). Scenarios tagged **`@greedy`** run against the legacy greedy engine.
+
+- **In clean (uncontended) situations the two are byte-identical**: the optimizer
+  keeps the greedy seed verbatim whenever it is already contention-free, so every
+  earliest-fit/banding rule in §2 holds untagged as long as nothing is forced to
+  compete.
+- **Under contention** the optimizer coordinates (chain moves, reordering,
+  day-moves for colliding occurrences, reviving dropped extras) and guarantees the
+  lexicographic objective: minimal priority-weighted overlap → minimal sleep
+  intrusion → minimal padding shortfall → most extras placed → longest durations →
+  habit regularity → earliest/banded starts. Exact clock times in contended
+  scenarios are guaranteed only under `@greedy`; untagged contended scenarios
+  should assert invariants (counts, windows, non-overlap, durations, conflicts) or
+  the coordination outcome itself (see `features/coordination-*.feature`).
+- Use `@greedy` ONLY when a scenario deliberately pins the greedy engine's exact
+  placement mechanics. `CAL_FORCE_GREEDY=1 npm test` A/B-runs the whole suite
+  against greedy (the coordination features are expected to fail there).
+- Known optimizer scope limits: occurrences not involved in any contention keep
+  their day (they may still shift in time); duration growth never triggers a day
+  move on its own.
+
+---
+
 ## 1. The intent JSON (what you place)
 
 Intents are added via a docstring of JSON (keys quoted; `//` comments allowed).
