@@ -13,7 +13,7 @@ import {
   type User,
 } from './api';
 import { computeSchedule } from './lib/solve';
-import { loadMilp } from './lib/milp';
+import { nowInOffset, solveInWorker } from './lib/solveWorker';
 
 type SaveStatus = 'saved' | 'processing' | 'saving' | 'error';
 const SAVE_RETRIES = 3;
@@ -179,11 +179,13 @@ export function App() {
 
   /**
    * The single write path. Applies the next inputs to local state INSTANTLY,
-   * renders a greedy preview a tick later, then swaps in the OPTIMIZED schedule
-   * (the lazily-loaded MIP solver) and publishes THAT — inputs and calendar go
-   * together, so they can never diverge. If the WASM never loads, the greedy
-   * result publishes instead. A sequence token coalesces rapid edits: only the
-   * latest edit's results are applied and saved.
+   * then solves in the WEB WORKER (greedy preview first, then the MIP optimize
+   * — WASM and all), so the main thread never blocks and the browser's
+   * "this page is slowing things down" heuristics never fire. The optimized
+   * schedule is what publishes — inputs and calendar go together, so they can
+   * never diverge; if the worker or WASM is unavailable, the greedy result
+   * publishes instead. A sequence token coalesces rapid edits: only the latest
+   * edit's results are applied and saved.
    */
   function applyChange(
     nextConfig: GlobalConfig,
@@ -198,10 +200,14 @@ export function App() {
     unsaved.current = true;
     setSaveStatus('processing');
     const seq = ++solveSeq.current;
-    setTimeout(async () => {
+    const nowDT = nowInOffset(nextConfig.utcOffsetMinutes ?? 0);
+    (async () => {
       if (seq !== solveSeq.current) return; // superseded by a newer edit
-      // 1. Instant greedy preview.
-      const preview = computeSchedule(nextConfig, nextIntents, nextModes, previous);
+      // 1. Greedy preview (worker; synchronous main-thread fallback).
+      const preview = await solveInWorker('preview', nextConfig, nextIntents, nextModes, previous, nowDT).catch(() =>
+        computeSchedule(nextConfig, nextIntents, nextModes, previous)
+      );
+      if (seq !== solveSeq.current) return;
       setSolveResp({
         instances: preview.instances,
         conflicts: preview.conflicts,
@@ -210,10 +216,10 @@ export function App() {
         computedAt: preview.computedAt,
         cached: false,
       });
-      // 2. Optimize (falls back to the preview if the solver isn't available).
-      const milp = await loadMilp();
-      if (seq !== solveSeq.current) return;
-      const r = milp ? computeSchedule(nextConfig, nextIntents, nextModes, previous, milp) : preview;
+      // 2. Optimize (degrades to the preview if the worker/WASM is unavailable).
+      const r = await solveInWorker('optimize', nextConfig, nextIntents, nextModes, previous, nowDT).catch(
+        () => preview
+      );
       if (seq !== solveSeq.current) return;
       const liveIntents = r.reapedIntentIds.length
         ? nextIntents.filter((i) => !r.reapedIntentIds.includes(i.id!))
@@ -238,7 +244,7 @@ export function App() {
         },
       };
       pumpSaves();
-    }, 0);
+    })();
   }
 
   /* ---------------- config: debounced recompute + publish ---------------- */

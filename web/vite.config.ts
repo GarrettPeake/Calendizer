@@ -7,6 +7,9 @@ import path from 'node:path';
 // development; in production the Worker serves this built SPA and the API itself.
 export default defineConfig({
   plugins: [react()],
+  // The solve worker lazy-loads the HiGHS WASM (dynamic import) → the worker
+  // bundle must be an ES module (the default iife can't code-split).
+  worker: { format: 'es' },
   resolve: {
     alias: {
       calendizer: path.resolve(__dirname, '../src/index.ts'),
