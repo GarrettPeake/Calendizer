@@ -9,6 +9,9 @@
 export * from './types';
 export { solve, greedySolver } from './solver';
 export type { Solver } from './solver';
+export { createMilpSolver } from './milp/milpSolver';
+export type { MilpDebugSink } from './milp/milpSolver';
+export type { HighsInstance } from './milp/stages';
 export { renderICS } from './ics';
 export { resolveTimeValue, resolveWindow } from './markers';
 export { solarTimes } from './solar';

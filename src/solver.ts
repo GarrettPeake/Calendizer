@@ -127,6 +127,8 @@ export function orderItems(a: Item, b: Item): number {
 
 /** Everything the greedy seed produced, exposed so other engines can build on it. */
 export interface Construction {
+  /** All work items in canonical order (placed and dropped alike). */
+  items: Item[];
   /** Seeded placements, in placement (item) order. */
   placements: Placement[];
   /** Optional (aspiration) items dropped at seed time — no clean slot existed. */
@@ -223,7 +225,7 @@ export function constructGreedy(input: SolveInput): Construction {
     }
   }
 
-  return { placements, dropped, fixedOccupied, conflicts, origin };
+  return { items, placements, dropped, fixedOccupied, conflicts, origin };
 }
 
 /**
