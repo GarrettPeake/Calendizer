@@ -256,9 +256,20 @@ export function WeekCalendar(props: {
                   <div
                     key={z.uid}
                     className="blocker-zone"
-                    style={{ top: z.startMin * PX, height: (z.endMin - z.startMin) * PX, background: zc.wash, borderLeft: `3px solid ${zc.edge}` }}
+                    style={{
+                      top: z.startMin * PX,
+                      height: (z.endMin - z.startMin) * PX - 1,
+                      background: zc.wash,
+                      border: `1.5px solid ${zc.edge}`,
+                      color: zc.text,
+                    }}
                     title={`${z.subject} (blocker)\n${fmt(z.startMin)}–${fmt(z.endMin)}`}
-                  />
+                  >
+                    <div className="bz-t">{z.subject}</div>
+                    <div className="bz-time">
+                      {fmt(z.startMin)}–{fmt(z.endMin)}
+                    </div>
+                  </div>
                 );
               })}
               {hours.map((h) => (
@@ -275,11 +286,15 @@ export function WeekCalendar(props: {
                 const realPx = (e.endMin - e.startMin) * PX;
                 const availablePx = ((e._maxBottomMin ?? 1440) - e.startMin) * PX - 1;
                 const height = Math.max(Math.min(Math.max(realPx - 1, MIN_EVT_PX), availablePx), 4);
+                // Events sharing time with a blocker sit visibly INSIDE its
+                // container: extra horizontal inset keeps the container's
+                // border and label readable around them.
+                const inset = e.blockedBy?.length ? 10 : 3;
                 const style: React.CSSProperties = {
                   top: e.startMin * PX,
                   height,
-                  left: `calc(${lane * widthPct}% + 3px)`,
-                  width: `calc(${widthPct}% - 6px)`,
+                  left: `calc(${lane * widthPct}% + ${inset}px)`,
+                  width: `calc(${widthPct}% - ${inset * 2}px)`,
                   ...(col ? { background: col.bg, borderLeftColor: col.border, color: col.text } : {}),
                 };
                 return (

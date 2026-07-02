@@ -14,13 +14,15 @@ export function colorFor(key: string): { bg: string; border: string; text: strin
   };
 }
 
-// A blocker's zone: a translucent tint over its time span — enough to read as
-// "occupied", faint enough that events drawn over it stay legible.
-export function blockerColor(key: string): { wash: string; edge: string } {
+// A blocker's container: a translucent tint + border over its time span —
+// enough to read as "occupied", faint enough that events nested inside stay
+// legible — plus a label tone for its title/timing.
+export function blockerColor(key: string): { wash: string; edge: string; text: string } {
   const hue = hueOf(key);
   return {
     wash: `hsl(${hue} 65% 50% / 0.14)`,
     edge: `hsl(${hue} 60% 50% / 0.55)`,
+    text: `hsl(${hue} 55% 45%)`,
   };
 }
 
