@@ -393,9 +393,6 @@ interface ArrangementEntry {
  */
 function scoreProposals(arr: ArrangementEntry[], items: Item[], c: Construction, config: GlobalConfig): number[] {
   const uidSet = new Set(items.map((i) => i.slot.uid));
-  const others: Array<{ startAbs: number; endAbs: number }> = [];
-  for (const q of c.placements) if (!uidSet.has(q.slot.uid)) others.push(occFor(q, c.origin));
-  for (const f of c.fixedOccupied) others.push(f);
   const mine = arr
     .filter((p) => p.pos)
     .map((p) => ({
@@ -404,6 +401,29 @@ function scoreProposals(arr: ArrangementEntry[], items: Item[], c: Construction,
       endAbs: absoluteMinutes(c.origin, p.pos!.date, p.pos!.startMin + p.pos!.durationMin),
       pos: p.pos!,
     }));
+  // Only intervals within a day (+padding) of the week's own range can
+  // contribute to any tier (overlap needs intersection; padding shortfall
+  // needs a gap under `padding` minutes) — everything else scores exactly
+  // zero, so pre-filtering the horizon down to the neighborhood is
+  // score-identical.
+  const margin = 1440 + (config.padding ?? 0);
+  let lo = Infinity;
+  let hi = -Infinity;
+  for (const p of mine) {
+    if (p.startAbs < lo) lo = p.startAbs;
+    if (p.endAbs > hi) hi = p.endAbs;
+  }
+  lo -= margin;
+  hi += margin;
+  const others: Array<{ startAbs: number; endAbs: number }> = [];
+  if (mine.length > 0) {
+    for (const q of c.placements) {
+      if (uidSet.has(q.slot.uid)) continue;
+      const o = occFor(q, c.origin);
+      if (o.endAbs > lo && o.startAbs < hi) others.push(o);
+    }
+    for (const f of c.fixedOccupied) if (f.endAbs > lo && f.startAbs < hi) others.push(f);
+  }
   let ov = 0;
   let ps = 0;
   let sl = 0;

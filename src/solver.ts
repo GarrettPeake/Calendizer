@@ -431,21 +431,31 @@ export function repair(placements: Placement[], fixed: Occupied[], config: Globa
   const MAX_PASSES = 64;
   for (let pass = 0; pass < MAX_PASSES; pass++) {
     let moved = false;
+    // One occupancy snapshot per pass, updated in place on every move. The
+    // dirty check scans the FULL list (own interval included): an interval's
+    // overlap with itself is exactly its duration, so subtracting it yields
+    // the same "overlap with everything else" the old per-placement exclusion
+    // list computed — without allocating that list for the (typical) clean
+    // placements.
+    const occAll = placements.map((q) => occFor(q, origin));
+    const all = fixed.concat(occAll);
     for (let i = 0; i < placements.length; i++) {
       const p = placements[i];
       if (p.pinned) continue;
-      // Obstacles = fixed events + every other placement.
-      const others = fixed.slice();
-      for (let j = 0; j < placements.length; j++) if (j !== i) others.push(occFor(placements[j], origin));
-
-      const current = overlapAt(others, origin, p.date, p.startMin, p.durationMin);
+      const current = overlapAt(all, origin, p.date, p.startMin, p.durationMin) - p.durationMin;
       if (current === 0) continue;
+
+      // Obstacles = fixed events + every other placement (self excluded).
+      const others = fixed.slice();
+      for (let j = 0; j < placements.length; j++) if (j !== i) others.push(occAll[j]);
 
       const bp = bestPlacement(p.slot, p.intent, config, others, origin);
       if (bp.overlapMin < current) {
         p.date = bp.date;
         p.startMin = bp.startMin;
         p.placedDuringSleep = bp.placedDuringSleep;
+        occAll[i] = occFor(p, origin);
+        all[fixed.length + i] = occAll[i];
         moved = true;
       }
     }
