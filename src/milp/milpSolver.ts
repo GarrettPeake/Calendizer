@@ -71,6 +71,85 @@ const MAX_ROWS = 30000;
 /** Phase A carries no habit targets; one shared instance keys identically. */
 const EMPTY_HABIT = new Map<string, number>();
 
+/**
+ * Speculative pre-solve of one SHARD of weeks — the parallel-pool primitive.
+ *
+ * Runs the SAME preprocessing as solveWeeks (greedy seed, week partition,
+ * analyzeWeek, occurrence/obstacle/model construction) with the placement
+ * state frozen at the greedy seed — no adoption, no cross-week evolution —
+ * and solves each selected contended week's PHASE A model, returning
+ * (memo key → values) entries.
+ *
+ * Soundness is by construction: entries are keyed by the same
+ * hash128(memoInputKey(...)) the sequential loop computes, and runStages is
+ * deterministic per (model, seed) — so merging these entries into the memo
+ * before a sequential solve changes NOTHING about its output, only which
+ * solves it gets for free. When the sequential loop's evolving context
+ * diverges from the pure seed (a prior week's solution crossing midnight, an
+ * adoption day-move next door), its key simply misses and it solves inline;
+ * when a week adopts, its key is never queried. Wasted speculation is
+ * additive CPU, never a wrong answer.
+ *
+ * Phase A only: phase B models depend on habit targets accumulated from
+ * earlier weeks' FINAL placements (inherently sequential) and cost ~6s total
+ * against phase A's ~100s on a contended year.
+ */
+export function speculatePhaseA(
+  highs: HighsInstance,
+  input: SolveInput,
+  shardIndex: number,
+  shardCount: number,
+  knownKeys?: ReadonlySet<string>,
+  onWeek?: (solved: boolean) => void
+): Array<[string, Map<string, number> | null]> {
+  const c = greedyPlacements(input);
+  const config = input.config;
+  const configJson = JSON.stringify(config);
+  const today = input.today ?? '0000-00-00';
+  const placedByUid = new Map<string, Placement>(c.placements.map((p) => [p.slot.uid, p]));
+  const droppedUids = new Set(c.dropped.map((i) => i.slot.uid));
+
+  const weeks = new Map<string, Item[]>();
+  for (const item of c.items) {
+    const wk = isoWeekKey(item.slot.date);
+    const arr = weeks.get(wk) ?? [];
+    arr.push(item);
+    weeks.set(wk, arr);
+  }
+  const weekKeys = [...weeks.keys()].sort();
+
+  const noAdoption = { adopted: false, adoptedDrops: new Set<string>() };
+  const out: Array<[string, Map<string, number> | null]> = [];
+  weekKeys.forEach((wk, i) => {
+    if (i % shardCount !== shardIndex) return;
+    const items = weeks.get(wk)!;
+    const seed = analyzeWeek(items, placedByUid, droppedUids, c, config, noAdoption, today);
+    if (!seed.needsMip || !seed.contention) {
+      onWeek?.(false);
+      return;
+    }
+    const occA = buildOccurrences(seed, wk, placedByUid, config, today);
+    if (occA.length === 0) {
+      onWeek?.(false);
+      return;
+    }
+    const obstaclesA = buildObstacles(occA, placedByUid, c);
+    const key = hash128(memoInputKey(occA, obstaclesA, EMPTY_HABIT, 'week', configJson));
+    if (knownKeys?.has(key)) {
+      onWeek?.(false);
+      return;
+    }
+    const model = buildWeekModel({ occ: occA, obstacles: obstaclesA, config, habit: EMPTY_HABIT, phase: 'week' });
+    if (model.constraints.length > MAX_ROWS) {
+      onWeek?.(false);
+      return;
+    }
+    out.push([key, runStages(highs, model).values]);
+    onWeek?.(true);
+  });
+  return out;
+}
+
 function solveWeeks(
   highs: HighsInstance,
   c: Construction,

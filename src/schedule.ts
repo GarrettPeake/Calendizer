@@ -11,7 +11,7 @@
  * deterministic. DB reads/writes, mode persistence and ICS rendering are the
  * caller's job.
  */
-import { GlobalConfig, Intent, Mode, Instance, CalendarEvent, ConflictReport } from './types';
+import { GlobalConfig, Intent, Mode, Instance, CalendarEvent, ConflictReport, SolveInput } from './types';
 import { ISODate, ISODateTime, addDays, startOfISOWeek } from './time';
 import { alignHorizonStart, overlay, realizedConflicts, isFullyPassed } from './temporal';
 import { applyBlockerSemantics } from './blockers';
@@ -54,9 +54,19 @@ export interface AssembleResult {
   solveMs: number;
 }
 
-export function assembleSchedule(input: AssembleInput): AssembleResult {
+/** Everything assembleSchedule derives BEFORE solving — shared with the
+ *  speculative pool workers so they construct the byte-identical SolveInput. */
+export interface PreparedSolve {
+  solveInput: SolveInput;
+  frozen: Instance[];
+  resolvedIntents: Intent[];
+  reapedIntentIds: string[];
+  retentionStart: ISODate;
+  end: ISODate;
+}
+
+export function prepareSolve(input: AssembleInput): PreparedSolve {
   const { config, intents, modeRecords, nowDT, today } = input;
-  const solver = input.solver ?? greedySolver;
   const horizonDays = input.horizonDays ?? 365;
   const retentionDays = input.retentionDays ?? 90;
 
@@ -96,9 +106,24 @@ export function assembleSchedule(input: AssembleInput): AssembleResult {
     .map((f) => ({ uid: f.uid, subject: f.subject, start: f.start, end: f.end }));
   const horizon = { start: alignHorizonStart(today), end };
 
+  return {
+    solveInput: { config, intents: liveIntents, modes, existingCalendar, horizon, today },
+    frozen,
+    resolvedIntents,
+    reapedIntentIds,
+    retentionStart,
+    end,
+  };
+}
+
+export function assembleSchedule(input: AssembleInput): AssembleResult {
+  const { nowDT, today } = input;
+  const solver = input.solver ?? greedySolver;
+  const { solveInput, frozen, resolvedIntents, reapedIntentIds, retentionStart, end } = prepareSolve(input);
+
   const perf = (globalThis as { performance?: { now?: () => number } }).performance;
   const t0 = perf?.now?.() ?? Date.now();
-  const out = solver.solve({ config, intents: liveIntents, modes, existingCalendar, horizon, today });
+  const out = solver.solve(solveInput);
   const solveMs = Math.round((perf?.now?.() ?? Date.now()) - t0);
 
   // Overlay: immutable frozen past over projected past (past projections drop),

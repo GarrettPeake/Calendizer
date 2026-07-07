@@ -144,13 +144,80 @@ export type WorkerMessage =
   | { id: number; type: 'result'; ok: false; error: string };
 
 // Progress routing: the worker's event loop serializes solves (they're
-// synchronous), so one mutable target is safe.
+// synchronous), so one mutable target is safe. The bar has two segments —
+// speculation ticks first, then the sequential pass — so progress is offset
+// by however many speculation ticks this request produced.
 let reportProgress: ((done: number, total: number) => void) | null = null;
 let weeksDone = 0;
 let weeksTotal = 0;
+let specBase = 0;
 
 let milpPromise: Promise<Solver | null> | null = null;
 const memo: MilpMemo = new Map();
+
+/**
+ * The speculation pool: sibling workers that pre-solve phase-A week models in
+ * parallel (one HiGHS instance each) and hand back memo entries, so the
+ * sequential solve mostly memo-hits. Sized to leave headroom for the solve
+ * worker itself and the main thread. `null` = nested workers unavailable —
+ * everything degrades to the plain sequential solve.
+ */
+const POOL_SIZE = Math.max(1, Math.min(6, (self.navigator?.hardwareConcurrency || 4) - 2));
+let pool: Worker[] | null | undefined;
+function getPool(): Worker[] | null {
+  if (pool !== undefined) return pool;
+  try {
+    pool = Array.from(
+      { length: POOL_SIZE },
+      () => new Worker(new URL('./pool.worker.ts', import.meta.url), { type: 'module' })
+    );
+  } catch {
+    pool = null;
+  }
+  return pool;
+}
+
+let specId = 0;
+
+/**
+ * Fan the horizon's weeks across the pool, merge the returned entries into
+ * the memo, and feed ticks to the progress bar (first segment). A worker that
+ * stalls past the deadline is abandoned for this request — its weeks simply
+ * solve inline; output is identical either way.
+ */
+function speculate(input: Omit<AssembleInput, 'solver'>, estWeeks: number): Promise<number> {
+  const workers = getPool();
+  if (!workers) return Promise.resolve(0);
+  const id = ++specId;
+  const knownKeys = [...memo.keys()];
+  let ticks = 0;
+  const estTotal = estWeeks * 2; // speculation segment + sequential segment
+  const jobs = workers.map(
+    (w, i) =>
+      new Promise<void>((resolve) => {
+        const timer = setTimeout(() => {
+          w.removeEventListener('message', onMsg);
+          resolve();
+        }, 120_000);
+        const onMsg = (e: MessageEvent<{ id: number; type: string; entries?: Array<[string, Array<[string, number]> | null]> }>) => {
+          if (e.data.id !== id) return;
+          if (e.data.type === 'tick') {
+            reportProgress?.(++ticks, estTotal);
+            return;
+          }
+          clearTimeout(timer);
+          w.removeEventListener('message', onMsg);
+          for (const [k, v] of e.data.entries ?? []) {
+            if (!memo.has(k)) memo.set(k, v === null ? null : new Map(v));
+          }
+          resolve();
+        };
+        w.addEventListener('message', onMsg);
+        w.postMessage({ id, input, shardIndex: i, shardCount: workers.length, knownKeys });
+      })
+  );
+  return Promise.all(jobs).then(() => ticks);
+}
 
 function getMilp(): Promise<Solver | null> {
   if (!milpPromise) {
@@ -174,10 +241,10 @@ function getMilp(): Promise<Solver | null> {
             onStart(total) {
               weeksDone = 0;
               weeksTotal = total;
-              reportProgress?.(0, total);
+              reportProgress?.(specBase, specBase + total);
             },
             onWeek() {
-              reportProgress?.(++weeksDone, weeksTotal);
+              reportProgress?.(specBase + ++weeksDone, specBase + weeksTotal);
             },
           },
           memo
@@ -205,6 +272,14 @@ self.onmessage = async (e: MessageEvent<SolveRequest>) => {
       kind === 'optimize'
         ? (done, total) => self.postMessage({ id, type: 'progress', done, total } satisfies WorkerMessage)
         : null;
+    specBase = 0;
+    if (kind === 'optimize' && solver) {
+      // Pre-solve phase-A models across the pool; the sequential pass below
+      // then mostly memo-hits. Weeks ≈ horizon days / 7 (progress estimate).
+      const inp = input as Omit<AssembleInput, 'solver'>;
+      const estWeeks = Math.max(1, Math.ceil(((inp.horizonDays ?? 365) + 7) / 7));
+      specBase = await speculate(inp, estWeeks);
+    }
     const r = assembleSchedule({ ...(input as Omit<AssembleInput, 'solver'>), solver: solver ?? undefined });
     reportProgress = null;
     self.postMessage({

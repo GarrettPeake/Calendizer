@@ -1,7 +1,7 @@
 import { test, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { solve } from '../solver';
-import { createMilpSolver } from './milpSolver';
+import { createMilpSolver, speculatePhaseA } from './milpSolver';
 import { HighsInstance } from './stages';
 import { GlobalConfig, Intent, SolveInput, Instance } from '../types';
 
@@ -203,6 +203,35 @@ test('a floor that cannot fit the clean days conflicts honestly — never double
   assert.equal(parks.length, 3); // floors always place
   assert.equal(new Set(days).size, 3, `doubled: ${days.join(',')}`);
   assert.ok(m.conflicts.some((c) => c.involved.includes('Park time') && c.involved.includes('Work')));
+});
+
+test('speculation: pre-solved shards merge into the memo and leave output byte-identical', () => {
+  // A contended fixture (the coordination chain forces a real phase-A solve).
+  const input = inputOf(CHAIN);
+  const fresh = createMilpSolver(highs).solve(input);
+
+  const memo: Map<string, Map<string, number> | null> = new Map();
+  const SHARDS = 3;
+  let solvedByPool = 0;
+  for (let s = 0; s < SHARDS; s++) {
+    for (const [k, v] of speculatePhaseA(highs, input, s, SHARDS, undefined, (solved) => {
+      if (solved) solvedByPool++;
+    })) {
+      memo.set(k, v);
+    }
+  }
+  assert.ok(solvedByPool >= 1, 'premise: the pool actually pre-solved something');
+
+  let memoHits = 0;
+  const primed = createMilpSolver(highs, {
+    onWeek(_wk, info) {
+      if (info.memo) memoHits++;
+    },
+  }, memo).solve(input);
+  assert.ok(memoHits >= 1, 'the sequential pass must HIT the speculative entries');
+  assert.deepEqual(primed.instances, fresh.instances);
+  assert.deepEqual(primed.conflicts, fresh.conflicts);
+  assert.deepEqual(primed.updates, fresh.updates);
 });
 
 test('duration growth: milp fills toward max at least as well as greedy', () => {

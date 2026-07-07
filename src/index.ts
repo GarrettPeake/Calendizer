@@ -9,7 +9,7 @@
 export * from './types';
 export { solve, greedySolver } from './solver';
 export type { Solver } from './solver';
-export { createMilpSolver } from './milp/milpSolver';
+export { createMilpSolver, speculatePhaseA } from './milp/milpSolver';
 export type { MilpDebugSink, MilpMemo } from './milp/milpSolver';
 export type { HighsInstance } from './milp/stages';
 export { renderICS } from './ics';
@@ -20,8 +20,8 @@ export { expandIntent } from './expand';
 export { tileChildren } from './children';
 export { activeModeOn, isIntentActiveOn, detectModeOverlaps, resolveModeName } from './modes';
 export { alignHorizonStart, overlay, realizedConflicts, isFullyPassed } from './temporal';
-export { assembleSchedule } from './schedule';
-export type { AssembleInput, AssembleResult, ModeRecord } from './schedule';
+export { assembleSchedule, prepareSolve } from './schedule';
+export type { AssembleInput, AssembleResult, ModeRecord, PreparedSolve } from './schedule';
 export {
   validateIntent,
   validateMode,
