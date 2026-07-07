@@ -30,7 +30,12 @@ export const HIGHS_OPTIONS: Record<string, unknown> = {
   threads: 1,
   random_seed: 0,
   mip_rel_gap: 0,
-  mip_abs_gap: 0,
+  // All stage objectives are integer-valued (see header), so terminating when
+  // incumbent − dualBound < 1 still returns the EXACT optimum value — it only
+  // skips the classic branch-and-bound tail of proving the last fractional
+  // gap. (The argmin among equally-optimal schedules can differ from a
+  // gap-0 run — a tie-break-level effect, not a quality change.)
+  mip_abs_gap: 0.5,
   output_flag: false,
   // Deterministic backstop (a NODE count, never wall-clock — wall-clock limits
   // would break same-input-same-output). A pathological stage stops here with
@@ -133,7 +138,16 @@ export function runStages(highs: HighsInstance, model: WeekModel): StagesResult 
       pins.push(`pin${k}: ${termsExpr(stage.terms)} <= ${stage.ideal + 0.5}`);
       solvedTuple.push(stage.ideal);
     } else {
-      const lp = stageLp(model, stage, pins);
+      // Hand the solver the incumbent as an objective cutoff: the incumbent's
+      // tier value is achievable (the same invariant skip-at-ideal and the
+      // seed guard already rely on), so `terms <= incumbent + 0.5` never cuts
+      // off the true optimum — it just lets branch-and-bound fathom anything
+      // worse than the seed immediately, instead of exploring (and sometimes
+      // node-capping inside) the region the guard would discard anyway. If
+      // the invariant were ever violated the model turns Infeasible and we
+      // keep the seed — today's failure semantics, not a corruption. The cut
+      // is per-stage scratch, never added to `pins`.
+      const lp = stageLp(model, stage, pins.concat(`cut${k}: ${termsExpr(stage.terms)} <= ${incumbentVal + 0.5}`));
       const t0 = Date.now();
       let res: HighsResult;
       try {
