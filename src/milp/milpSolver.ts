@@ -225,6 +225,10 @@ function solveWeeks(
         template.set(templateKey(item, wd), p ? { weekday: isoWeekday(p.date), startMin: p.startMin, durationMin: p.durationMin } : null);
       }
       templateScore = scoreWeekArrangement(items, placedByUid, c, config);
+      {
+        const g = globalThis as { process?: { env?: Record<string, string | undefined> } };
+        if (g.process?.env?.MILP_DEBUG_ADOPT) console.error(`template ${wk}: score=[${templateScore.join(',')}]`);
+      }
     };
     // An adopted week inherited a fully-solved arrangement (validated legal
     // and lexicographically no worse than the greedy seed, doubling first) —
@@ -736,9 +740,14 @@ function tryAdoptTemplate(
     // residual overlap) that isn't worth a multi-second re-solve. Bounded
     // relative to the TEMPLATE (updated only on real solves) → no compounding.
     // Doubling and the placed count stay exact.
+    //
+    // ELEMENT-WISE, not lexicographic: "reproduce the solved quality" means no
+    // tier degrades beyond its tolerance. A translation that happens to beat
+    // the template on overlap must not smuggle damage past the gate in a lower
+    // tier (repair once "fixed" drift by moving a 3h game to 00:00 — 480 sleep
+    // minutes hidden behind a 36-minute overlap win).
     const tol = [0, 0, 0, 10, 0, 45];
     for (let k = 0; k < sTranslated.length; k++) {
-      if (sTranslated[k] < templateScore[k]) break;
       if (sTranslated[k] > templateScore[k] + tol[k]) {
         dbgAdopt('template-degraded', `tier ${k}: ${sTranslated[k]} > ${templateScore[k]} + ${tol[k]}`);
         return none;

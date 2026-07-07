@@ -251,3 +251,47 @@ test('obstacle: tight bounds and both directions when the window strides it', ()
   // zmA = na − S = 1020−720 = 300; zmB = E − nb = 780−540 = 240 → max 300.
   assert.equal(bound, '0 <= ovb0_0 <= 300');
 });
+
+test('day-exclusivity: a mobile NATIVE optional is priced on a day where a spilled sibling sits fixed', () => {
+  // The second "two Park times" bug: greedy spilled the required floor onto
+  // Saturday (fixed, non-native) and dropped the optional extra whose native
+  // slot.date IS Saturday. The sib exemption must not give the revived native
+  // a free pass into its "own" day — a daydouble row must price it.
+  const parkIntent = { subject: 'Park time', id: 'park', priority: 45, duration: [45, 76] as [number, number], window: { not_before: '11:30', not_after: '15:00' } };
+  const floor = makeItem(parkIntent, {
+    date: '2026-07-09',
+    uid: 'park|week:2026-W28|0',
+    flexibleDay: true,
+    bucketDates: ['2026-07-09', '2026-07-11', '2026-07-12'],
+  });
+  const extra = makeItem(parkIntent, {
+    date: '2026-07-11',
+    uid: 'park|week:2026-W28|2',
+    flexibleDay: true,
+    optional: true,
+    bucketDates: ['2026-07-09', '2026-07-11', '2026-07-12'],
+  });
+  const cfg = { ...CONFIG, fillToMax: true };
+  const model = buildWeekModel({
+    occ: [
+      // Non-hot spilled floor: single-day residency on Saturday → no a-vars → fixed.
+      { item: floor, days: ['2026-07-11'], seed: { date: '2026-07-11', startMin: 780, durationMin: 75 } },
+      // Dropped optional, day-mobile, native Saturday among its candidates.
+      { item: extra, days: ['2026-07-11', '2026-07-12'], seed: null },
+    ],
+    obstacles: [],
+    config: cfg,
+    habit: new Map(),
+    phase: 'week',
+  });
+  // Saturday: occurrence 1's presence there (a1_0) must cost a daydouble unit
+  // against the fixed resident — `a1_0 − xv ≤ 1 − fixedResidents = 0`.
+  const sat = model.constraints.find((c) => c.startsWith('xd_park_20260711'));
+  assert.ok(sat, 'Saturday exclusivity row must exist for the native optional');
+  assert.match(sat!, /a1_0/);
+  assert.match(sat!, /<= 0$/);
+  // Sunday: only one possible resident besides the fixed Saturday floor → no row.
+  assert.ok(!model.constraints.some((c) => c.startsWith('xd_park_20260712')));
+  const dbl = model.stages.find((s) => s.name === 'daydouble')!;
+  assert.ok(dbl.terms.size > 0);
+});

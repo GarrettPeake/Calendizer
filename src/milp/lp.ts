@@ -644,9 +644,14 @@ export function buildWeekModel(input: BuildInput): WeekModel {
       const isFixed = (oi: number) => decode[oi].aVars.length === 0; // resident, immovable
       const others = entries.filter((oi) => !isSib(oi));
       const mobileOthers = others.filter((oi) => !isFixed(oi));
-      const anyFixedResident = entries.some((oi) => isFixed(oi));
       const mobileSibs = entries.filter((oi) => isSib(oi) && !isFixed(oi));
-      if (mobileOthers.length === 0) continue;
+      const fixedNonStack = others.filter((oi) => isFixed(oi)).length;
+      // Rows are needed when a mobile NON-native could join the day — and also
+      // when a mobile NATIVE could: nativeness is only a free pass into the
+      // occurrence's own per_day stack, never onto a day where a SPILLED
+      // sibling sits fixed (a revived optional joining its native Saturday
+      // next to the spilled floor was the second "two Park times" bug).
+      if (mobileOthers.length === 0 && (mobileSibs.length === 0 || fixedNonStack === 0)) continue;
       const dTag = d.replace(/-/g, '');
       const presOf = (oi: number) => `a${oi}_${occ[oi].days.indexOf(d)}`;
       const presentAtSeed = (oi: number) => (occ[oi].seed ? occ[oi].seed!.date === d : false);
@@ -660,7 +665,7 @@ export function buildWeekModel(input: BuildInput): WeekModel {
       // tier then piled on for free). Fixed residents fold in as constants;
       // the per_day stack counts as one group via a row per stack member.
       const fixedResidents =
-        others.filter((oi) => isFixed(oi)).length + entries.filter((oi) => isSib(oi) && isFixed(oi) && occ[oi].days[0] === d).length;
+        fixedNonStack + entries.filter((oi) => isSib(oi) && isFixed(oi) && occ[oi].days[0] === d).length;
       const moversLin = () => {
         const lin = new Lin();
         for (const oi of mobileOthers) lin.add(1, presOf(oi));

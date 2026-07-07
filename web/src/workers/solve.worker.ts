@@ -33,7 +33,7 @@ import { assembleSchedule, createMilpSolver, type AssembleInput, type MilpMemo, 
  * Bump MEMO_VERSION when solver/model/key semantics change to discard old
  * entries wholesale.
  */
-const MEMO_VERSION = 3; // v3: input-hash keys, per-key rows, FIFO cap
+const MEMO_VERSION = 4; // v4: day-exclusivity covers mobile natives vs spilled fixed siblings
 const DB_NAME = 'calendizer-solver';
 const STORE = 'memo';
 const MAX_ROWS = 1000;

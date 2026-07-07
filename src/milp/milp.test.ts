@@ -205,6 +205,45 @@ test('a floor that cannot fit the clean days conflicts honestly — never double
   assert.ok(m.conflicts.some((c) => c.involved.includes('Park time') && c.involved.includes('Work')));
 });
 
+test('weekend-squeezed weekly extras never double a day (prod shape of the second "two Park times" bug)', () => {
+  const cfg: GlobalConfig = { ...CONFIG, wakeup: '08:00', sleep: '23:30', fillToMax: true, utcOffsetMinutes: -420 };
+  // Prod shape (bug report 2026-07-07): Work blocks every weekday's whole Park
+  // window and daily lunch splits the weekend window — three occurrences fight
+  // over two clean days, and the extra whose NATIVE slot.date is Saturday must
+  // not end up sharing it with the spilled floor. (The exact model-level hole —
+  // the native's free pass past the exclusivity rows — is pinned in lp.test.ts;
+  // here the guard is end-to-end on the prod intent shape.)
+  const intents = [
+    intent('Work', {
+      priority: 50,
+      duration: [510, 510],
+      window: { starts_at: '09:00' },
+      cardinality: { period: { unit: 'day' }, days: { weekdays: ['MO', 'TU', 'WE', 'TH', 'FR'] } },
+      id: 'work',
+    }),
+    intent('lunch', {
+      duration: [60, 60],
+      window: { not_before: '12:00', not_after: '13:00' },
+      cardinality: { period: { unit: 'day' }, per_day: { count: [1, 1] } },
+      id: 'lunch',
+    }),
+    intent('Park time', {
+      priority: 45,
+      duration: [45, 76],
+      window: { not_before: '11:30', not_after: '15:00' },
+      cardinality: { period: { unit: 'week' }, days: { count: [1, 3] } },
+      id: 'park',
+    }),
+  ];
+  const input = inputOf(intents, cfg);
+  const m = createMilpSolver(highs).solve(input);
+  const parks = m.instances.filter((i) => i.subject === 'Park time');
+  const days = parks.map((i) => i.date);
+  assert.equal(new Set(days).size, days.length, `doubled: ${days.join(',')}`);
+  assert.ok(parks.length >= 1); // floors always place
+  assert.equal(overlapMinutes(m.instances.filter((i) => i.subject !== 'lunch')), 0);
+});
+
 test('speculation: pre-solved shards merge into the memo and leave output byte-identical', () => {
   // A contended fixture (the coordination chain forces a real phase-A solve).
   const input = inputOf(CHAIN);
