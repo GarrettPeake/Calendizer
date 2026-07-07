@@ -127,8 +127,7 @@ export function App() {
     setIntents(ints);
     setModes(mds);
     setFeed(fd);
-    // Show the last published calendar instantly, then recompute + republish (rolls
-    // the horizon, freezes elapsed occurrences, reaps dead intents).
+    // Show the last published calendar instantly.
     if (cal.horizon) {
       setSolveResp({
         instances: cal.instances,
@@ -138,6 +137,17 @@ export function App() {
         computedAt: cal.computedAt ?? '',
         cached: true,
       });
+      // Inputs haven't changed since that publish, and the solve is a pure
+      // function of (inputs, ISO week) — a same-week re-solve reproduces the
+      // stored calendar, so only a NEW week warrants recomputing (rolls the
+      // horizon, freezes elapsed occurrences, reaps dead intents). Shift+R
+      // forces a regeneration for debugging.
+      const offset = cfg.utcOffsetMinutes ?? 0;
+      const localDate = (utcISO: string) => new Date(Date.parse(utcISO) + offset * 60_000).toISOString().slice(0, 10);
+      const computedAt = cal.computedAt ?? '';
+      if (computedAt && mondayOf(localDate(computedAt)) === mondayOf(nowInOffset(offset).slice(0, 10))) {
+        return;
+      }
     }
     applyChange(cfg, ints, mds, cal.instances);
   }
@@ -313,6 +323,23 @@ export function App() {
     setGeoDismissed(geoProposal.sig);
     localStorage.setItem('calendizer_geo_dismissed', geoProposal.sig);
   }
+
+  /* ---------------- Shift+R: force a full regenerate + republish ---------------- */
+  // Load skips the re-solve within the calendar's own ISO week (byte-identical
+  // by construction), so this is the manual override for debugging the solver.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'R' || !e.shiftKey || e.metaKey || e.ctrlKey || e.altKey) return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
+      if (!config) return;
+      e.preventDefault();
+      applyChange(config, intents, modes);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [config, intents, modes]);
 
   /* ---------------- mutations (all funnel through applyChange → async save) ---------------- */
   function saveEditing(updated: Intent) {
