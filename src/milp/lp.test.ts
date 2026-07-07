@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildWeekModel, WeekOccurrence } from './lp';
-import { memoKey } from './milpSolver';
+import { buildWeekModel, buildDecode, WeekOccurrence } from './lp';
+import { memoInputKey, hash128 } from './milpSolver';
 import { Item } from '../solver';
 import { GlobalConfig, Intent } from '../types';
 
@@ -195,26 +195,44 @@ test('habit: |s − h| rows appear only with a target; gated for optionals', () 
   assert.ok(model.stages.some((s) => s.name === 'habit'));
 });
 
-test('memoKey folds in the seed: identical model text, different seed ⇒ different key', () => {
+test('memo key folds in the seed: identical model text, different seed ⇒ different key', () => {
   // Stages are BOUNDED searches (node caps, improving-sols caps, the
   // never-worse-than-seed guard), so a cached result is a function of
   // (model, seed) — replaying a solution reached from a different seed can
   // silently pin a schedule below what the current seed would achieve.
   const item = makeItem({ subject: 'walk', duration: [60, 90], window: { not_before: '09:00', not_after: '19:00' } });
+  const cfg = { ...CONFIG, fillToMax: true };
+  const cfgJson = JSON.stringify(cfg);
+  const occAt = (startMin: number): WeekOccurrence[] => [
+    { ...occOf(item), seed: { date: '2026-07-07', startMin, durationMin: 60 } },
+  ];
   const model = (startMin: number) =>
-    buildWeekModel({
-      occ: [{ ...occOf(item), seed: { date: '2026-07-07', startMin, durationMin: 60 } }],
-      obstacles: [],
-      config: { ...CONFIG, fillToMax: true },
-      habit: new Map(),
-      phase: 'day',
-    });
+    buildWeekModel({ occ: occAt(startMin), obstacles: [], config: cfg, habit: new Map(), phase: 'day' });
   const a = model(540);
   const b = model(600);
   assert.deepEqual(a.constraints, b.constraints); // premise: the model text is identical
   assert.deepEqual(a.bounds, b.bounds);
-  assert.notEqual(memoKey(a), memoKey(b));
-  assert.equal(memoKey(a), memoKey(model(540)));
+  const keyOf = (startMin: number) => memoInputKey(occAt(startMin), [], new Map(), 'day', cfgJson);
+  assert.notEqual(keyOf(540), keyOf(600));
+  assert.equal(keyOf(540), keyOf(540));
+  assert.notEqual(hash128(keyOf(540)), hash128(keyOf(600)));
+});
+
+test('a memo hit reconstructs the exact decode buildWeekModel would produce', () => {
+  const flex = makeItem(
+    { subject: 'extra', duration: [45, 60], window: { not_before: '09:00', not_after: '18:00' } },
+    { optional: true, flexibleDay: true, bucketDates: ['2026-07-07', '2026-07-08'] }
+  );
+  const fixedItem = makeItem({ subject: 'walk' });
+  const occ = [occOf(fixedItem), occOf(flex, ['2026-07-07', '2026-07-08'])];
+  const model = buildWeekModel({
+    occ,
+    obstacles: [],
+    config: { ...CONFIG, fillToMax: true },
+    habit: new Map(),
+    phase: 'week',
+  });
+  assert.deepEqual(buildDecode(occ), model.decode);
 });
 
 test('obstacle: tight bounds and both directions when the window strides it', () => {

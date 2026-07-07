@@ -13,7 +13,7 @@ import {
   type User,
 } from './api';
 import { computeSchedule } from './lib/solve';
-import { nowInOffset, solveInWorker } from './lib/solveWorker';
+import { nowInOffset, prewarmSolver, solveInWorker } from './lib/solveWorker';
 import { SolveOverlay, type OverlayPhase } from './components/SolveOverlay';
 
 type SaveStatus = 'saved' | 'processing' | 'saving' | 'error';
@@ -38,6 +38,10 @@ function initialTheme(): Theme {
 }
 
 export function App() {
+  // Start the worker + WASM + memo hydration immediately — the first solve
+  // otherwise pays that whole chain AFTER auth and the boot API calls.
+  useEffect(() => prewarmSolver(), []);
+
   const [theme, setTheme] = useState<Theme>(initialTheme);
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);

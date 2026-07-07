@@ -91,6 +91,20 @@ function dispatch(req: SolveRequest, waiters: Pending[]): void {
   }
 }
 
+/**
+ * Kick off the worker + HiGHS WASM fetch/compile + IndexedDB memo hydration
+ * NOW instead of on the first optimize — the whole chain otherwise serializes
+ * behind the app's boot network calls. Fire-and-forget: no pending entry, so
+ * the reply is dropped by the id lookup.
+ */
+export function prewarmSolver(): void {
+  try {
+    getWorker().postMessage({ id: nextId++, kind: 'warmup' } satisfies SolveRequest);
+  } catch {
+    // Worker unavailable — the solve path has its own main-thread fallback.
+  }
+}
+
 /** Current wall-clock "YYYY-MM-DDTHH:MM" in the user's fixed offset. */
 export function nowInOffset(offsetMinutes: number): string {
   return new Date(Date.now() + offsetMinutes * 60_000).toISOString().slice(0, 16);
@@ -99,7 +113,7 @@ export function nowInOffset(offsetMinutes: number): string {
 export function solveInWorker(
   kind: 'preview' | 'optimize',
   config: GlobalConfig,
-  intents: SolveRequest['input']['intents'],
+  intents: NonNullable<SolveRequest['input']>['intents'],
   modes: ModeRecord[],
   previous: Instance[],
   nowDT: string,

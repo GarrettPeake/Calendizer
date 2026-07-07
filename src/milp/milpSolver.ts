@@ -35,7 +35,7 @@ import {
 import { GlobalConfig, SolveInput, SolveOutput } from '../types';
 import { ISODate, isoWeekKey, absoluteMinutes, startOfISOWeek, addDays, weekdayCode } from '../time';
 import { resolveWindow, resolveSleepBlackout } from '../markers';
-import { buildWeekModel, DayObstacle, WeekOccurrence, WeekModel } from './lp';
+import { buildWeekModel, buildDecode, DayObstacle, WeekOccurrence, WeekModel, OccurrenceVars } from './lp';
 import { HighsInstance, runStages, StageTrace } from './stages';
 
 /** Optional hooks: per-week traces for tooling, and start/per-week ticks that
@@ -45,15 +45,16 @@ export interface MilpDebugSink {
   onWeek?(weekKey: string, info: { skipped: boolean; fallback?: boolean; memo?: boolean; trace?: StageTrace[] }): void;
 }
 
-/** The solver's model-solution memo: full model text → solved var values. */
+/** The solver's model-solution memo: input-hash key → solved var values. */
 export type MilpMemo = Map<string, Map<string, number> | null>;
 
 export function createMilpSolver(highs: HighsInstance, debug?: MilpDebugSink, memo?: MilpMemo): Solver {
-  // Model-content-addressed memo, persistent ACROSS solves on this instance
+  // Input-content-addressed memo, persistent ACROSS solves on this instance
   // (and, when the caller supplies and persists the Map — e.g. the web worker
   // via IndexedDB — across page loads): an edit or reload re-solves only the
-  // weeks whose models actually changed. Safe because the key is the FULL
-  // model text: identical key ⇒ identical model ⇒ identical solution.
+  // weeks whose model inputs actually changed. The key hashes a faithful
+  // serialization of buildWeekModel's INPUTS (see memoInputKey) — a hit skips
+  // building the model entirely.
   const memoMap: MilpMemo = memo ?? new Map();
   return {
     solve(input: SolveInput): SolveOutput {
@@ -67,6 +68,9 @@ export function createMilpSolver(highs: HighsInstance, debug?: MilpDebugSink, me
 /** Model-size safety valve: beyond this many rows, keep the greedy week. */
 const MAX_ROWS = 30000;
 
+/** Phase A carries no habit targets; one shared instance keys identically. */
+const EMPTY_HABIT = new Map<string, number>();
+
 function solveWeeks(
   highs: HighsInstance,
   c: Construction,
@@ -75,6 +79,7 @@ function solveWeeks(
   debug?: MilpDebugSink
 ): void {
   const config = input.config;
+  const configJson = JSON.stringify(config); // memo-key component, constant per solve
   const today = input.today ?? '0000-00-00'; // no `today` ⇒ every day is visible
   const placedByUid = new Map<string, Placement>(c.placements.map((p) => [p.slot.uid, p]));
   const droppedUids = new Set(c.dropped.map((i) => i.slot.uid));
@@ -165,24 +170,29 @@ function solveWeeks(
     let anyFallback = false;
 
     // Runs one model through memo + stages and applies its solution. Returns
-    // false when the seed was kept (ideal/failed/capped-no-better).
-    const runModel = (model: ReturnType<typeof buildWeekModel>, occ: WeekOccurrence[], label: string): boolean => {
-      if (model.constraints.length > MAX_ROWS) {
-        anyFallback = true;
-        return false;
-      }
-      const key = memoKey(model);
+    // false when the seed was kept (ideal/failed/capped-no-better). The model
+    // is built LAZILY: a memo hit needs only the decode layout, which is a
+    // pure function of the occurrences (buildDecode).
+    const runModel = (build: () => WeekModel, key: string, occ: WeekOccurrence[], label: string): boolean => {
       let values = memo.get(key);
+      let decode: OccurrenceVars[];
       if (values !== undefined) {
         anyMemo = true;
+        decode = buildDecode(occ);
       } else {
+        const model = build();
+        if (model.constraints.length > MAX_ROWS) {
+          anyFallback = true;
+          return false; // never memoized — the guard re-applies every solve
+        }
         const res = runStages(highs, model);
         values = res.values;
         memo.set(key, values);
         for (const t of res.trace) weekTrace.push({ ...t, name: `${label}:${t.name}` });
+        decode = model.decode;
       }
       if (values === null) return false;
-      applySolution(model, occ, values, placedByUid, config);
+      applySolution(decode, occ, values, placedByUid, config);
       return true;
     };
 
@@ -192,7 +202,12 @@ function solveWeeks(
       const occA = buildOccurrences(seed, wk, placedByUid, config, today);
       if (occA.length > 0) {
         const obstaclesA = buildObstacles(occA, placedByUid, c);
-        runModel(buildWeekModel({ occ: occA, obstacles: obstaclesA, config, habit: new Map(), phase: 'week' }), occA, 'A');
+        runModel(
+          () => buildWeekModel({ occ: occA, obstacles: obstaclesA, config, habit: EMPTY_HABIT, phase: 'week' }),
+          hash128(memoInputKey(occA, obstaclesA, EMPTY_HABIT, 'week', configJson)),
+          occA,
+          'A'
+        );
       }
     }
 
@@ -217,7 +232,12 @@ function solveWeeks(
         };
       });
       const obstaclesB = buildObstacles(occB, placedByUid, c);
-      runModel(buildWeekModel({ occ: occB, obstacles: obstaclesB, config, habit, phase: 'day' }), occB, date.slice(5));
+      runModel(
+        () => buildWeekModel({ occ: occB, obstacles: obstaclesB, config, habit, phase: 'day' }),
+        hash128(memoInputKey(occB, obstaclesB, habit, 'day', configJson)),
+        occB,
+        date.slice(5)
+      );
     }
 
     debug?.onWeek?.(wk, { skipped: false, fallback: anyFallback, memo: anyMemo, trace: weekTrace });
@@ -769,32 +789,91 @@ function buildObstacles(
   return out;
 }
 
-export function memoKey(model: WeekModel): string {
-  return [
-    model.constraints.join('\n'),
-    model.bounds.join('\n'),
-    model.generals.join(' '),
-    model.binaries.join(' '),
-    model.stages.map((s) => s.name + ':' + [...s.terms.entries()].map(([k, v]) => `${k}=${v}`).join(',')).join(';'),
-    // The SEED is part of the key: stages are bounded searches (node caps,
-    // improving-sols caps, never-worse-than-seed guard), so the result is a
-    // deterministic function of (model, seed) — NOT of the model alone. An
-    // edit elsewhere in the week can leave this model's text identical while
-    // changing the seed; replaying a solution reached from a worse seed would
-    // pin the schedule to that worse answer forever (the "Watch sunset never
-    // shrinks" bug).
-    [...model.seedValues.entries()].map(([k, v]) => `${k}=${v}`).join(','),
-  ].join('#');
+/**
+ * Serialize buildWeekModel's INPUTS faithfully. The model (and its seed) is a
+ * pure function of these values, so key equality implies model+seed equality —
+ * while a hit can skip building the model entirely. The SEED is part of the
+ * serialization because stages are bounded searches (node caps, improving-sols
+ * caps, never-worse-than-seed guard): the result is a deterministic function
+ * of (model, seed), NOT of the model alone — replaying a solution reached from
+ * a worse seed would pin the schedule to that worse answer forever (the
+ * "Watch sunset never shrinks" bug).
+ *
+ * Deliberately excluded (model-irrelevant): subjects/labels, intent mode,
+ * children. Included generously where cheap — over-discrimination only costs
+ * a cache miss (a deterministic re-solve), never a wrong replay.
+ */
+export function memoInputKey(
+  occ: WeekOccurrence[],
+  obstacles: DayObstacle[],
+  habit: Map<string, number>,
+  phase: 'week' | 'day',
+  configJson: string
+): string {
+  const parts: string[] = [phase, configJson];
+  for (const o of occ) {
+    const it = o.item;
+    parts.push(
+      it.slot.uid,
+      o.days.join(','),
+      o.seed ? `${o.seed.date}|${o.seed.startMin}|${o.seed.durationMin}` : '-',
+      o.forceRequired ? 'R' : '-',
+      it.pinned ? 'P' : '-',
+      it.endPinned ? 'E' : '-',
+      String(it.slack),
+      it.slot.date,
+      it.slot.optional ? 'O' : '-',
+      `${it.slot.perDayIndex}/${it.slot.perDayCount}`,
+      it.slot.intentId,
+      String(it.intent.priority),
+      it.intent.duration.join('-'),
+      JSON.stringify(it.intent.window ?? {})
+    );
+  }
+  for (const ob of obstacles) parts.push(`${ob.date}|${ob.startMin}|${ob.endMin}`);
+  for (const [k, v] of habit) parts.push(`${k}=${v}`);
+  return parts.join(' ');
+}
+
+/**
+ * 128-bit non-cryptographic hash (cyrb128-style: Math.imul + xor — exact
+ * integer ops, bit-identical across JS engines). Collisions over
+ * self-generated inputs are a ~2^-64 birthday concern — accepted deliberately
+ * in exchange for ~100× smaller keys in memory and IndexedDB (the audit's
+ * flagged tradeoff vs. the collision-proof full-text key).
+ */
+export function hash128(str: string): string {
+  let h1 = 1779033703;
+  let h2 = 3144134277;
+  let h3 = 1013904242;
+  let h4 = 2773480762;
+  for (let i = 0; i < str.length; i++) {
+    const k = str.charCodeAt(i);
+    h1 = h2 ^ Math.imul(h1 ^ k, 597399067);
+    h2 = h3 ^ Math.imul(h2 ^ k, 2869860233);
+    h3 = h4 ^ Math.imul(h3 ^ k, 951274213);
+    h4 = h1 ^ Math.imul(h4 ^ k, 2716044179);
+  }
+  h1 = Math.imul(h3 ^ (h1 >>> 18), 597399067);
+  h2 = Math.imul(h4 ^ (h2 >>> 22), 2869860233);
+  h3 = Math.imul(h1 ^ (h3 >>> 17), 951274213);
+  h4 = Math.imul(h2 ^ (h4 >>> 19), 2716044179);
+  return (
+    (h1 >>> 0).toString(16).padStart(8, '0') +
+    (h2 >>> 0).toString(16).padStart(8, '0') +
+    (h3 >>> 0).toString(16).padStart(8, '0') +
+    (h4 >>> 0).toString(16).padStart(8, '0')
+  );
 }
 
 function applySolution(
-  model: WeekModel,
+  decode: OccurrenceVars[],
   occ: WeekOccurrence[],
   values: Map<string, number>,
   placedByUid: Map<string, Placement>,
   config: GlobalConfig
 ): void {
-  for (const dec of model.decode) {
+  for (const dec of decode) {
     const o = occ[dec.occIndex];
     const uid = o.item.slot.uid;
     const chosen = dec.aVars.length

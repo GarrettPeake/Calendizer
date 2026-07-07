@@ -153,6 +153,27 @@ export interface BuildInput {
   phase: 'week' | 'day';
 }
 
+/**
+ * The variable-name/decode layout for a set of occurrences — a pure function
+ * of the occurrences alone, so a memo HIT can apply a cached solution without
+ * building the model at all. buildWeekModel uses this same function, keeping
+ * one source of truth for the naming scheme.
+ */
+export function buildDecode(occ: WeekOccurrence[]): OccurrenceVars[] {
+  return occ.map((o, oi) => {
+    const optional = !!o.item.slot.optional && !o.forceRequired;
+    const needsA = optional || o.days.length > 1;
+    return {
+      occIndex: oi,
+      sVar: `s${oi}`,
+      dVar: `d${oi}`,
+      aVars: needsA ? o.days.map((date, k) => ({ name: `a${oi}_${k}`, date })) : [],
+      fixedDate: needsA ? null : o.days[0],
+      optional,
+    };
+  });
+}
+
 interface DayCtx {
   date: ISODate;
   /** Earliest possible occupied start / latest possible occupied end on the day. */
@@ -173,7 +194,7 @@ export function buildWeekModel(input: BuildInput): WeekModel {
   const bounds: string[] = [];
   const generals: string[] = [];
   const binaries: string[] = [];
-  const decode: OccurrenceVars[] = [];
+  const decode: OccurrenceVars[] = buildDecode(occ);
 
   const ovTerms = new Map<string, number>();
   const dblTerms = new Map<string, number>();
@@ -199,12 +220,8 @@ export function buildWeekModel(input: BuildInput): WeekModel {
     const w = (it.intent.priority ?? 0) + 1;
     const [dMin, dMax] = it.intent.duration;
     const flexDur = !!config.fillToMax && dMax > dMin;
-    const sVar = `s${oi}`;
-    const dVar = `d${oi}`;
-    const multiDay = o.days.length > 1;
-    const needsA = optional || multiDay;
-    const aVars = needsA ? o.days.map((date, k) => ({ name: `a${oi}_${k}`, date })) : [];
-    decode.push({ occIndex: oi, sVar, dVar, aVars, fixedDate: needsA ? null : o.days[0], optional });
+    const { sVar, dVar, aVars } = decode[oi];
+    const needsA = aVars.length > 0;
     for (const a of aVars) binaries.push(a.name);
 
     // Incumbent (greedy seed) values.
