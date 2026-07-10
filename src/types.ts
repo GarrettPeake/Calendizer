@@ -207,6 +207,13 @@ export interface SolveInput {
    * in-model-equivalent optima can differ in what the user actually sees.
    */
   today?: ISODate;
+  /**
+   * The previously PUBLISHED future instances (uid-keyed warm start). Solvers
+   * MAY use them to anchor a re-solve so unchanged inputs reproduce the
+   * published calendar instead of churning it; correctness never depends on
+   * them. Greedy and the MIP ignore this field.
+   */
+  templateHint?: Array<{ uid: string; date: ISODate; start: ISODateTime }>;
 }
 
 export interface SolveOutput {

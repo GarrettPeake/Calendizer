@@ -106,8 +106,15 @@ export function prepareSolve(input: AssembleInput): PreparedSolve {
     .map((f) => ({ uid: f.uid, subject: f.subject, start: f.start, end: f.end }));
   const horizon = { start: alignHorizonStart(today), end };
 
+  // The previously published FUTURE instances, as a uid-keyed warm start: a
+  // template-following solver reproduces the published calendar for unchanged
+  // inputs instead of churning it (the frozen past above is unaffected).
+  const templateHint = input.frozen
+    .filter((f) => f.start >= nowDT)
+    .map((f) => ({ uid: f.uid, date: f.date, start: f.start }));
+
   return {
-    solveInput: { config, intents: liveIntents, modes, existingCalendar, horizon, today },
+    solveInput: { config, intents: liveIntents, modes, existingCalendar, horizon, today, templateHint },
     frozen,
     resolvedIntents,
     reapedIntentIds,

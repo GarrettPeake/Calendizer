@@ -11,6 +11,8 @@ export { solve, greedySolver } from './solver';
 export type { Solver } from './solver';
 export { createMilpSolver, speculatePhaseA } from './milp/milpSolver';
 export type { MilpDebugSink, MilpMemo } from './milp/milpSolver';
+export { createBubbleSolver } from './bubble/bubbleSolver';
+export type { BubbleOptions, BubbleDebugSink } from './bubble/bubbleSolver';
 export type { HighsInstance } from './milp/stages';
 export { renderICS } from './ics';
 export { applyBlockerSemantics } from './blockers';
