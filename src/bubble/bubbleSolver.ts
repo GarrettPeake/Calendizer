@@ -47,6 +47,7 @@ import { ISODate, isoWeekKey, startOfISOWeek, addDays } from '../time';
 import { scoreWeekArrangement } from '../scoring';
 import { isoWeekday, isUnsatisfiable, createHabitTracker, templateKeyOf, habitKeyOf } from '../weekShared';
 import { WeekState, TrialResult, CandidateScore, betterCandidate } from './insert';
+import { bubbleUtility } from './reflow';
 import { mulberry32, FIXED_SEED, weightedOrder, Rng } from './rng';
 
 export interface BubbleOptions {
@@ -278,14 +279,14 @@ function placeBest(ctx: WeekCtx, item: Item): boolean {
   for (let di = 0; di < days.length; di++) {
     const date = days[di];
     if (dayBlocked(ctx, item, date)) continue;
-    const before = ctx.state.weightedOf(date);
+    const before = ctx.state.utilityOf(date);
     const trial = ctx.state.tryInsert(uid, date);
     if (!trial) continue;
     const bub = ctx.state.bubbleOn(uid, date)!;
     const start = trial.starts[trial.ordinal];
     const target = ctx.habitTargets.get(habitKeyOf(item));
     const score: CandidateScore = {
-      deltaWeighted: trial.weightedDuration - before,
+      deltaWeighted: trial.utility - before,
       nativeDay: date === item.slot.date ? 0 : 1,
       load: ctx.state.loadOf(date),
       habitDist: target === undefined ? 0 : Math.abs(start - target),
@@ -305,20 +306,28 @@ function weekScore(ctx: WeekCtx): number[] {
   return scoreWeekArrangement(ctx.items, ctx.placedByUid, ctx.c, ctx.config);
 }
 
-/** H extended with [habit distance, weighted earliness] so P5 nudges count. */
+/** H extended with [−utility, habit distance, weighted earliness]: fair growth
+ *  outranks raw minutes (a starved-to-floor event loses to shared slack even
+ *  when starving it fills an otherwise-dead pocket), then P5 nudges count. */
 function weekScoreExt(ctx: WeekCtx): number[] {
   const base = weekScore(ctx);
   let habitDist = 0;
   let earliness = 0;
+  let utility = 0;
   for (const item of ctx.movable) {
     const p = ctx.placedByUid.get(item.slot.uid);
     if (!p || !ctx.movableUids.has(item.slot.uid)) continue; // locked items are constants
     const target = ctx.habitTargets.get(habitKeyOf(item));
     if (target !== undefined) habitDist += Math.abs(p.startMin - target);
     const bub = ctx.state.bubbleOn(item.slot.uid, p.date);
-    if (bub) earliness += bub.weight * Math.max(0, p.startMin - bub.notBefore);
+    if (bub) {
+      earliness += bub.weight * Math.max(0, p.startMin - bub.notBefore);
+      utility += bubbleUtility(bub, p.durationMin);
+    }
   }
-  return [...base, habitDist, earliness];
+  // −utility sits between the H tiers and the aesthetic tie-breaks: placed
+  // count and the hard tiers still dominate, but fairness beats habit/earliness.
+  return [...base.slice(0, 5), -utility, habitDist, earliness];
 }
 
 interface WeekSnapshot {

@@ -38,8 +38,22 @@ export interface ReflowOptions {
 }
 
 export type ReflowResult =
-  | { ok: true; starts: number[]; durations: number[]; weightedDuration: number }
+  | { ok: true; starts: number[]; durations: number[]; weightedDuration: number; utility: number }
   | { ok: false; violator: number };
+
+/**
+ * Concave per-bubble utility: floor minutes at full weight, growth minutes at
+ * diminishing value (f(x) = x(2−x): marginal value 2w at the floor, 0 at max).
+ * Candidate orderings are compared by Σ weight×u — so an ordering that starves
+ * one flexible event to its floor loses to one that shares slack fairly, even
+ * when the starving order squeezes a few more raw minutes into a dead pocket
+ * (the "weekend dinner squished for no reason" report).
+ */
+export function bubbleUtility(b: ReflowBubble, d: number): number {
+  if (b.max <= b.floor) return b.weight * d;
+  const x = Math.min(1, Math.max(0, (d - b.floor) / (b.max - b.floor)));
+  return b.weight * (b.floor + (b.max - b.floor) * x * (2 - x));
+}
 
 function ceilTo(value: number, step: number): number {
   return Math.ceil(value / step) * step;
@@ -135,6 +149,10 @@ export function reflow(bubbles: ReflowBubble[], opts: ReflowOptions): ReflowResu
   }
 
   let weightedDuration = 0;
-  for (let i = 0; i < bubbles.length; i++) weightedDuration += bubbles[i].weight * durations[i];
-  return { ok: true, starts: starts as number[], durations, weightedDuration };
+  let utility = 0;
+  for (let i = 0; i < bubbles.length; i++) {
+    weightedDuration += bubbles[i].weight * durations[i];
+    utility += bubbleUtility(bubbles[i], durations[i]);
+  }
+  return { ok: true, starts: starts as number[], durations, weightedDuration, utility };
 }

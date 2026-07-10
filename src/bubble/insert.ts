@@ -9,14 +9,14 @@ import { Item, Placement, Construction, occFor, isInSleep, orderItems } from '..
 import { GlobalConfig } from '../types';
 import { ISODate } from '../time';
 import { projectToDays } from '../weekShared';
-import { reflow, ReflowBubble } from './reflow';
+import { reflow, bubbleUtility, ReflowBubble } from './reflow';
 import { bubbleFor } from './timeline';
 
 export interface TrialResult {
   date: ISODate;
   ordinal: number;
-  /** Post-reflow Σ weight×duration on the affected day. */
-  weightedDuration: number;
+  /** Post-reflow Σ weight×utility on the affected day (the candidate objective). */
+  utility: number;
   /** Post-reflow Σ weight×start — the earliness tiebreak (lower is better). */
   weightedStart: number;
   starts: number[];
@@ -25,7 +25,7 @@ export interface TrialResult {
 
 /** Placement-candidate comparison, lexicographic (see plan §1.3). */
 export interface CandidateScore {
-  deltaWeighted: number; // maximize
+  deltaWeighted: number; // Δ concave utility on the affected day — maximize
   nativeDay: number; // 0 = native, 1 = not (minimize)
   load: number; // minimize
   habitDist: number; // minimize
@@ -127,7 +127,7 @@ export class WeekState {
   private reflowDay(
     date: ISODate,
     uids: string[]
-  ): { starts: number[]; durations: number[]; weightedDuration: number; weightedStart: number } | null {
+  ): { starts: number[]; durations: number[]; utility: number; weightedStart: number } | null {
     const bubbles: ReflowBubble[] = [];
     for (const uid of uids) {
       const b = this.bubbleOn(uid, date);
@@ -142,18 +142,17 @@ export class WeekState {
     if (!r.ok) return null;
     let weightedStart = 0;
     for (let i = 0; i < bubbles.length; i++) weightedStart += bubbles[i].weight * r.starts[i];
-    return { starts: r.starts, durations: r.durations, weightedDuration: r.weightedDuration, weightedStart };
+    return { starts: r.starts, durations: r.durations, utility: r.utility, weightedStart };
   }
 
-  /** Current post-reflow weighted duration of a date (0 for an empty day). */
-  weightedOf(date: ISODate): number {
+  /** Current post-reflow concave utility of a date (0 for an empty day). */
+  utilityOf(date: ISODate): number {
     const uids = this.seq.get(date) ?? [];
-    if (uids.length === 0) return 0;
     let total = 0;
     for (const uid of uids) {
       const p = this.placedByUid.get(uid);
       const b = this.bubbleOn(uid, date);
-      if (p && b) total += b.weight * p.durationMin;
+      if (p && b) total += bubbleUtility(b, p.durationMin);
     }
     return total;
   }
@@ -185,8 +184,8 @@ export class WeekState {
       const trial = [...cur.slice(0, ordinal), uid, ...cur.slice(ordinal)];
       const r = this.reflowDay(date, trial);
       if (!r) continue;
-      let take = !best || r.weightedDuration > best.weightedDuration;
-      if (!take && best && r.weightedDuration === best.weightedDuration && bestStarts) {
+      let take = !best || r.utility > best.utility;
+      if (!take && best && r.utility === best.utility && bestStarts) {
         const mine = startsByUid(trial, r.starts);
         let someEarlier = false;
         let noneLater = true;

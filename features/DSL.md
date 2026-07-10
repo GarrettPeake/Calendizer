@@ -37,6 +37,9 @@ exactness oracle for triage, no longer shipped to clients.
   with per-grid-unit validation — NOT handed wholesale to the highest priority
   (that was the MIP's linear-objective behavior). Durations may land off-grid to
   fill exactly to a marker edge (sunset, bedtime); starts stay grid-aligned.
+  Candidate arrangements are compared by CONCAVE utility (growth minutes have
+  diminishing value toward each event's max), so no flexible event is starved
+  to its floor just to squeeze raw minutes into a pocket nobody else can use.
 - Use `@greedy` ONLY when a scenario deliberately pins the greedy engine's exact
   placement mechanics. `CAL_FORCE_GREEDY=1 npm test` A/B-runs the whole suite
   against greedy (the coordination features are expected to fail there).

@@ -205,3 +205,26 @@ test('ends_at pin grows backward from its anchored end', () => {
   assert.equal(w.end.slice(11), '22:00');
   assert.equal(w.durationMin, 90);
 });
+
+test('a pinned-event pocket never starves a flexible dinner to its floor (weekend squish)', () => {
+  // Prod shape (report 2026-07-10): a packed weekend day where the only slot
+  // "left over" for dinner was the 30' pocket between the pinned sunset and
+  // dinner's 21:00 window end. Raw weighted minutes PREFER parking dinner in
+  // the pocket (nobody else can use it); the concave utility objective must
+  // instead give dinner a fair share of the day's shared slack.
+  const cfg: GlobalConfig = { ...CONFIG, wakeup: '08:00', sleep: '23:30', fillToMax: true, utcOffsetMinutes: -420 };
+  const intents = [
+    intent('Getting ready', { priority: 30, duration: [60, 60], window: { starts_at: '08:00' }, cardinality: { period: { unit: 'day' }, per_day: { count: [1, 1] } } }),
+    intent('Gym workout', { duration: [75, 90], window: { not_before: '07:00', not_after: '23:00' }, cardinality: { period: { unit: 'day' }, per_day: { count: [1, 1] } } }),
+    intent('Coding projects', { duration: [30, 90], window: { not_before: '10:00' }, cardinality: { period: { unit: 'day' }, per_day: { count: [1, 1] } } }),
+    intent('lunch', { duration: [60, 60], window: { not_before: '12:00', not_after: '13:00' }, cardinality: { period: { unit: 'day' }, per_day: { count: [1, 1] } } }),
+    intent('Cyberpunk 2077', { priority: 45, duration: [180, 180], window: {}, cardinality: { period: { unit: 'day' }, per_day: { count: [1, 1] } } }),
+    intent('Pottery', { priority: 45, duration: [60, 180], window: { not_before: '11:00', not_after: '21:00' }, cardinality: { period: { unit: 'day' }, per_day: { count: [1, 1] } } }),
+    intent('Watch sunset', { duration: [46, 60], window: { starts_at: '19:44' }, cardinality: { period: { unit: 'day' }, per_day: { count: [1, 1] } } }),
+    intent('Dinner', { priority: 45, duration: [30, 90], window: { not_before: '17:30', not_after: '21:00' }, cardinality: { period: { unit: 'day' }, per_day: { count: [1, 1] } } }),
+  ];
+  const m = createBubbleSolver().solve({ config: cfg, intents, modes: [], existingCalendar: [], horizon: { start: '2026-07-08', end: '2026-07-08' } });
+  const dinner = m.instances.find((i) => i.subject === 'Dinner')!;
+  assert.ok(dinner.durationMin >= 55, `dinner starved: ${dinner.durationMin}' at ${dinner.start.slice(11)}`);
+  assert.equal(overlapMinutes(m.instances), 0);
+});
