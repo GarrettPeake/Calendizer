@@ -5,7 +5,7 @@
  * Construction's placement array stays coherent for cross-week scoring), and
  * the lexicographic placement heuristic.
  */
-import { Item, Placement, Construction, occFor, isInSleep } from '../solver';
+import { Item, Placement, Construction, occFor, isInSleep, orderItems } from '../solver';
 import { GlobalConfig } from '../types';
 import { ISODate } from '../time';
 import { projectToDays } from '../weekShared';
@@ -17,6 +17,8 @@ export interface TrialResult {
   ordinal: number;
   /** Post-reflow Σ weight×duration on the affected day. */
   weightedDuration: number;
+  /** Post-reflow Σ weight×start — the earliness tiebreak (lower is better). */
+  weightedStart: number;
   starts: number[];
   durations: number[];
 }
@@ -125,7 +127,10 @@ export class WeekState {
   }
 
   /** Reflow a date's current sequence; returns null when the ordering is invalid. */
-  private reflowDay(date: ISODate, uids: string[]): { starts: number[]; durations: number[]; weightedDuration: number } | null {
+  private reflowDay(
+    date: ISODate,
+    uids: string[]
+  ): { starts: number[]; durations: number[]; weightedDuration: number; weightedStart: number } | null {
     const bubbles: ReflowBubble[] = [];
     for (const uid of uids) {
       const b = this.bubbleOn(uid, date);
@@ -137,7 +142,10 @@ export class WeekState {
       padding: this.config.padding ?? 0,
       obstacles: this.obstaclesFor(date),
     });
-    return r.ok ? { starts: r.starts, durations: r.durations, weightedDuration: r.weightedDuration } : null;
+    if (!r.ok) return null;
+    let weightedStart = 0;
+    for (let i = 0; i < bubbles.length; i++) weightedStart += bubbles[i].weight * r.starts[i];
+    return { starts: r.starts, durations: r.durations, weightedDuration: r.weightedDuration, weightedStart };
   }
 
   /** Current post-reflow weighted duration of a date (0 for an empty day). */
@@ -153,17 +161,48 @@ export class WeekState {
     return total;
   }
 
-  /** Try `uid` at every ordinal of `date`; best (max weightedDuration) or null. */
+  /** Try `uid` at every ordinal of `date`; best (max weightedDuration) or
+   *  null. Ties resolve to the CANONICAL ordinal — the stable-insertion
+   *  position under orderItems (priority desc, alphabetical tiebreak) — so
+   *  same-window events stack in the contracted order; a tie candidate beats
+   *  it only as a PARETO earliness improvement (nobody starts later, someone
+   *  starts earlier — e.g. a sunrise event must not queue behind an evening
+   *  one just because of the canonical order). */
   tryInsert(uid: string, date: ISODate): TrialResult | null {
     const cur = this.seq.get(date);
     if (cur === undefined || !this.bubbleOn(uid, date)) return null;
+    const item = this.itemByUid.get(uid)!;
+    let preferred = 0;
+    for (const u of cur) if (orderItems(this.itemByUid.get(u)!, item) < 0) preferred++;
+    const ordinals = Array.from({ length: cur.length + 1 }, (_, o) => o).sort(
+      (a, b) => Math.abs(a - preferred) - Math.abs(b - preferred) || a - b
+    );
+    const startsByUid = (trial: string[], starts: number[]) => {
+      const m = new Map<string, number>();
+      trial.forEach((u, i) => m.set(u, starts[i]));
+      return m;
+    };
     let best: TrialResult | null = null;
-    for (let ordinal = 0; ordinal <= cur.length; ordinal++) {
+    let bestStarts: Map<string, number> | null = null;
+    for (const ordinal of ordinals) {
       const trial = [...cur.slice(0, ordinal), uid, ...cur.slice(ordinal)];
       const r = this.reflowDay(date, trial);
       if (!r) continue;
-      if (!best || r.weightedDuration > best.weightedDuration) {
+      let take = !best || r.weightedDuration > best.weightedDuration;
+      if (!take && best && r.weightedDuration === best.weightedDuration && bestStarts) {
+        const mine = startsByUid(trial, r.starts);
+        let someEarlier = false;
+        let noneLater = true;
+        for (const [u, s] of mine) {
+          const b = bestStarts.get(u)!;
+          if (s < b) someEarlier = true;
+          else if (s > b) noneLater = false;
+        }
+        take = someEarlier && noneLater;
+      }
+      if (take) {
         best = { date, ordinal, ...r };
+        bestStarts = startsByUid(trial, r.starts);
       }
     }
     return best;

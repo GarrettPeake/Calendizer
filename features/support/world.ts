@@ -25,14 +25,20 @@ import {
   Update,
 } from '../../src/types';
 import { solve, Solver } from '../../src/solver';
-import { createMilpSolver } from '../../src/milp/milpSolver';
+import { createBubbleSolver } from '../../src/bubble/bubbleSolver';
 
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const loadHighs = require('highs');
-
-let milpSolver: Solver | null = null;
+// The untagged default engine is the BUBBLE solver (production's optimize
+// path). CAL_SOLVER=milp runs the untagged suite against the MIP oracle
+// instead (node-side exactness reference); @greedy / CAL_FORCE_GREEDY pin
+// the legacy greedy engine.
+let engine: Solver = createBubbleSolver();
 BeforeAll(async function () {
-  milpSolver = createMilpSolver(await loadHighs());
+  if (process.env.CAL_SOLVER === 'milp') {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const loadHighs = require('highs');
+    const { createMilpSolver } = await import('../../src/milp/milpSolver');
+    engine = createMilpSolver(await loadHighs());
+  }
 });
 
 export const DEFAULT_CONFIG: GlobalConfig = {
@@ -75,7 +81,7 @@ export class CalendizerWorld extends World {
       existingCalendar: this.existing,
       horizon: this.horizon,
     };
-    this.output = this.useGreedy || !milpSolver ? solve(input) : milpSolver.solve(input);
+    this.output = this.useGreedy ? solve(input) : engine.solve(input);
   }
 
   ensureSolved(): SolveOutput {

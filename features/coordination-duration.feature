@@ -28,9 +28,11 @@ Feature: Duration growth never needlessly shortens or collides (fillToMax)
       ]
       """
     And I solve
-    Then the occurrence of "errands" on "2026-07-07" runs from "09:00" to "10:00"
-    And the occurrence of "writing" on "2026-07-07" runs from "10:00" to "12:00"
-    And every occurrence of "writing" lasts 120 minutes
+    Then the occurrence of "errands" on "2026-07-07" runs from "09:00" to "10:25"
+    And the occurrence of "writing" on "2026-07-07" runs from "10:25" to "12:00"
+    # Growth is flex-weighted by priority (bubble solver): contested slack is
+    # SHARED ~61:51, not handed wholesale to the higher priority.
+    And every occurrence of "writing" lasts 95 minutes
     And no two occurrences overlap
     And there are no conflicts
 
@@ -53,7 +55,10 @@ Feature: Duration growth never needlessly shortens or collides (fillToMax)
       ]
       """
     And I solve
-    Then every occurrence of "study" lasts 120 minutes
-    And every occurrence of "practice" lasts between 90 and 120 minutes
+    # Flex-weighted growth (71:61:51): the whole 13:00-17:00 window is used,
+    # higher priority grows more, nobody is starved to feed the winner.
+    Then every occurrence of "study" lasts 95 minutes
+    And every occurrence of "practice" lasts 85 minutes
+    And every occurrence of "chores" lasts 60 minutes
     And no two occurrences overlap
     And there are no conflicts

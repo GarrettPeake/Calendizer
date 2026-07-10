@@ -10,29 +10,40 @@ assertions must match the documented behaviour below exactly.
 
 ---
 
-## 0. Two solvers, one tag
+## 0. Three engines, one tag
 
-Untagged scenarios run against the **default solver** — a per-week MIP optimizer
-(HiGHS). Scenarios tagged **`@greedy`** run against the legacy greedy engine.
+Untagged scenarios run against the **default solver** — the **bubble optimizer**
+(event-first placement with fresh-reflow evaluation of every candidate day and
+insertion position, then budgeted optimization sweeps). Scenarios tagged
+**`@greedy`** run against the legacy greedy engine. `CAL_SOLVER=milp npm test`
+runs the untagged suite against the per-week MIP (HiGHS) — kept as the node-side
+exactness oracle for triage, no longer shipped to clients.
 
-- **In clean (uncontended) situations the two are byte-identical**: the optimizer
-  keeps the greedy seed verbatim whenever it is already contention-free, so every
-  earliest-fit/banding rule in §2 holds untagged as long as nothing is forced to
-  compete.
-- **Under contention** the optimizer coordinates (chain moves, reordering,
-  day-moves for colliding occurrences, reviving dropped extras) and guarantees the
-  lexicographic objective: minimal priority-weighted overlap → minimal sleep
-  intrusion → minimal padding shortfall → most extras placed → longest durations →
-  habit regularity → earliest/banded starts. Exact clock times in contended
-  scenarios are guaranteed only under `@greedy`; untagged contended scenarios
-  should assert invariants (counts, windows, non-overlap, durations, conflicts) or
-  the coordination outcome itself (see `features/coordination-*.feature`).
+- **Same-window stacking order is contractual**: equal-quality arrangements
+  stack in priority order, alphabetical (subject) tiebreak — the bubble solver
+  resolves insertion ties to that canonical order, deviating only for a Pareto
+  earliness improvement (nobody later, someone earlier: a sunrise event never
+  queues behind an evening one).
+- **Under contention** the bubble solver coordinates (insertion-push reordering,
+  day-moves, pool rescue swaps, reviving dropped extras) and targets the same
+  lexicographic objective as the MIP did: no same-intent day doubling → minimal
+  priority-weighted overlap → minimal sleep intrusion → minimal padding
+  shortfall → most extras placed → longest durations → habit regularity →
+  earliest/banded starts. It is a heuristic: a per-week never-worse-than-greedy
+  guard bounds it from below, and conflicts mean "could not find", not "proven
+  impossible" (the MIP oracle answers the latter).
+- **Duration growth is flex-weighted** (`fillToMax`): contested free space is
+  shared across flexible events in proportion to `(priority+1)` — water-filling
+  with per-grid-unit validation — NOT handed wholesale to the highest priority
+  (that was the MIP's linear-objective behavior). Durations may land off-grid to
+  fill exactly to a marker edge (sunset, bedtime); starts stay grid-aligned.
 - Use `@greedy` ONLY when a scenario deliberately pins the greedy engine's exact
   placement mechanics. `CAL_FORCE_GREEDY=1 npm test` A/B-runs the whole suite
   against greedy (the coordination features are expected to fail there).
-- Known optimizer scope limits: occurrences not involved in any contention keep
-  their day (they may still shift in time); duration growth never triggers a day
-  move on its own.
+- Week-to-week: solved weeks propagate forward as day-relative templates
+  (weekday + order, times re-derived by reflow, so solar drift is absorbed);
+  a re-solve warm-starts from the previously published calendar
+  (`templateHint`), so unchanged inputs reproduce the published schedule.
 
 ---
 
