@@ -114,8 +114,11 @@ chronological order. Examples you can rely on:
 - choose 2 of 5 (Mon–Fri) → indices **1, 3** → Tue, Thu.
 
 **Period buckets.** `week` = ISO week (Mon–Sun). `month` = calendar month. `day` =
-each date. `mode` = the named mode's span. `interval > 1` merges consecutive buckets
-into groups of `interval`.
+each date. `mode` = the named mode's span. `interval > 1` merges buckets into groups
+of `interval`, ANCHORED in absolute time (never horizon-relative — a rolling horizon
+must not shift a biweekly cadence): the phase comes from `period.anchor` (the intent's
+creation day, stamped by the UI) or a fixed epoch when absent. `unit: day` with
+`interval: N` yields the FIRST day of each N-day group.
 
 **Where in the day an occurrence lands (earliest-fit):**
 - If `starts_at` is set → the start is **pinned** to that exact time (hard).

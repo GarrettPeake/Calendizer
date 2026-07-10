@@ -48,6 +48,13 @@ export interface PeriodSpec {
   unit: 'day' | 'week' | 'month' | 'mode';
   /** Recurrence interval (defaults to 1). Ignored when unit === "mode". */
   interval?: number;
+  /**
+   * Phase anchor for interval > 1: multi-period groups are tethered to the
+   * period containing this date (typically the intent's creation day), so the
+   * cadence NEVER drifts as the horizon rolls forward. Without an anchor,
+   * groups align to a fixed epoch — arbitrary phase, but equally stable.
+   */
+  anchor?: ISODate;
 }
 
 export type DaysSpec =

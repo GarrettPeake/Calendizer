@@ -345,6 +345,15 @@ export function App() {
   function saveEditing(updated: Intent) {
     if (!editing || !config) return;
     const withId: Intent = { ...updated, id: updated.id ?? crypto.randomUUID() };
+    // Tether multi-period cadences (every other week, every 3rd day…) to the
+    // creation day: the phase the user first sees is the phase they keep.
+    const period = withId.cardinality?.period;
+    if (editing.isNew && period && (period.interval ?? 1) > 1 && !period.anchor) {
+      withId.cardinality = {
+        ...withId.cardinality,
+        period: { ...period, anchor: nowInOffset(config.utcOffsetMinutes ?? 0).slice(0, 10) },
+      };
+    }
     const nextIntents = editing.isNew
       ? [...intents, withId]
       : intents.map((i) => (i.id === withId.id ? withId : i));

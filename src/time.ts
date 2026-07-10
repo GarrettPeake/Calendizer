@@ -34,7 +34,7 @@ export function addDays(d: ISODate, n: number): ISODate {
  * Keyed purely by the date string, so it never needs invalidation.
  */
 const epochDayCache = new Map<ISODate, number>();
-function epochDay(d: ISODate): number {
+export function epochDay(d: ISODate): number {
   let v = epochDayCache.get(d);
   if (v === undefined) {
     v = parseDate(d).getTime() / MS_PER_DAY;

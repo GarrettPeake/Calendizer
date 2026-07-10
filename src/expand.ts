@@ -11,12 +11,14 @@
  * Each slot carries a stable UID keyed to (intent + bucket + index), never to a
  * time, so re-solving updates events in place.
  */
-import { Intent, Mode, Cardinality } from './types';
+import { Intent, Mode, Cardinality, PeriodSpec } from './types';
 import {
   ISODate,
   isoWeekKey,
   monthKey,
   weekdayCode,
+  epochDay,
+  startOfISOWeek,
 } from './time';
 import { activeModeOn, isIntentActiveOn } from './modes';
 
@@ -77,11 +79,43 @@ function bucketKeyFor(date: ISODate, card: Cardinality, intent: Intent, modes: M
   return 'all';
 }
 
-/** Apply period.interval by merging consecutive base buckets into groups. */
-function mergeIntervalBuckets(orderedKeys: string[], interval: number): Map<string, string> {
+/**
+ * Apply period.interval by merging base buckets into groups of `interval`.
+ *
+ * Grouping is ANCHORED in absolute time, never horizon-relative: the horizon
+ * start rolls forward with the retention window, and index-based groups would
+ * flip a biweekly cadence's parity week over week (prod report 2026-07-10).
+ * Each bucket's group is derived from its absolute period index — days since
+ * epoch / ISO weeks since the epoch Monday / months since year 0 — offset by
+ * the period containing `anchor` (the intent's creation day when the UI
+ * stamped one; the fixed epoch otherwise, which is an arbitrary but STABLE
+ * phase). Mode-unit buckets keep consecutive index grouping (bounded spans).
+ */
+function mergeIntervalBuckets(
+  orderedKeys: string[],
+  interval: number,
+  unit: PeriodSpec['unit'] | undefined,
+  anchor: ISODate | undefined,
+  firstDateOf: (key: string) => ISODate
+): Map<string, string> {
   const map = new Map<string, string>();
   if (interval <= 1) {
     for (const k of orderedKeys) map.set(k, k);
+    return map;
+  }
+  if (unit === 'day' || unit === 'week' || unit === 'month') {
+    const idx = (d: ISODate): number => {
+      if (unit === 'day') return epochDay(d);
+      if (unit === 'week') return Math.floor(epochDay(startOfISOWeek(d)) / 7);
+      return Number(d.slice(0, 4)) * 12 + (Number(d.slice(5, 7)) - 1);
+    };
+    const anchorIdx = anchor ? idx(anchor) : 0;
+    const leadByGroup = new Map<number, string>();
+    for (const k of orderedKeys) {
+      const g = Math.floor((idx(firstDateOf(k)) - anchorIdx) / interval);
+      if (!leadByGroup.has(g)) leadByGroup.set(g, k);
+      map.set(k, leadByGroup.get(g)!);
+    }
     return map;
   }
   orderedKeys.forEach((k, i) => {
@@ -114,7 +148,13 @@ export function expandIntent(
     }
     baseBuckets.get(k)!.push(d);
   }
-  const intervalMap = mergeIntervalBuckets(orderedBaseKeys, card.period?.interval ?? 1);
+  const intervalMap = mergeIntervalBuckets(
+    orderedBaseKeys,
+    card.period?.interval ?? 1,
+    card.period?.unit,
+    card.period?.anchor,
+    (k) => baseBuckets.get(k)![0]
+  );
   const buckets = new Map<string, ISODate[]>();
   const orderedKeys: string[] = [];
   for (const k of orderedBaseKeys) {
@@ -209,7 +249,10 @@ function chooseDays(days: ISODate[], card: Cardinality): ISODate[] {
   if (!spec) {
     // No day spec: one day per bucket if periodic, else every candidate day.
     if (card.per_day && !card.period) return days; // per_day across all days
-    if (card.period?.unit === 'day') return days; // bucket is a single date
+    // A day-unit bucket is a single date — except under interval > 1, where the
+    // merged group spans `interval` days and "every Nth day" means ONE of them
+    // (the first, so the anchored cadence is exact).
+    if (card.period?.unit === 'day') return (card.period.interval ?? 1) > 1 ? days.slice(0, 1) : days;
     if (!card.period) return days;
     return spreadPick(days, 1);
   }
