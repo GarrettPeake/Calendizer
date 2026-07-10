@@ -178,9 +178,16 @@ export function constructGreedy(input: SolveInput): Construction {
     return (a.id ?? '').localeCompare(b.id ?? '');
   });
 
+  // Occurrences that already HAPPENED (their uid is in the frozen past) are
+  // spent: re-planning one would produce a future duplicate the temporal
+  // overlay silently discards — a phantom that eats space, day-exclusivity,
+  // and weekly quota while rendering nothing.
+  const spent = new Set(input.spentUids ?? []);
+
   const items: Item[] = [];
   ordered.forEach((intent) => {
     for (const slot of expandIntent(intent, horizonDates, modes, config.fillToMax)) {
+      if (spent.has(slot.uid)) continue;
       const rw = resolveWindow(intent.window, slot.date, config);
       const pinned = rw.startsAt !== null || rw.endsAt !== null;
       const endPinned = rw.startsAt === null && rw.endsAt !== null; // starts_at wins if both

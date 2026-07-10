@@ -252,6 +252,10 @@ export class WeekState {
   }
 
   private writeDay(date: ISODate, uids: string[], starts: number[], durations: number[]): void {
+    const g = globalThis as { process?: { env?: Record<string, string | undefined> } };
+    if (g.process?.env?.BUBBLE_TRACE === date) {
+      console.error(`writeDay ${date}: ${uids.map((u, i) => `${u.split('|')[0].slice(0, 6)}${u.split('|')[2]}@${starts[i]}+${durations[i]}`).join(' ')}`);
+    }
     for (let i = 0; i < uids.length; i++) {
       const item = this.itemByUid.get(uids[i])!;
       const existing = this.placedByUid.get(uids[i]);

@@ -104,6 +104,12 @@ export function prepareSolve(input: AssembleInput): PreparedSolve {
   const existingCalendar: CalendarEvent[] = frozen
     .filter((f) => f.end > nowDT)
     .map((f) => ({ uid: f.uid, subject: f.subject, start: f.start, end: f.end }));
+  // Today's ELAPSED hours are not plannable: anything placed before `now` would
+  // be silently dropped by the overlay (a phantom). One immovable block keeps
+  // every engine out of them.
+  if (nowDT > `${today}T00:00`) {
+    existingCalendar.push({ uid: '(elapsed)', subject: '(elapsed)', start: `${today}T00:00`, end: nowDT });
+  }
   const horizon = { start: alignHorizonStart(today), end };
 
   // The previously published FUTURE instances, as a uid-keyed warm start: a
@@ -114,7 +120,16 @@ export function prepareSolve(input: AssembleInput): PreparedSolve {
     .map((f) => ({ uid: f.uid, date: f.date, start: f.start }));
 
   return {
-    solveInput: { config, intents: liveIntents, modes, existingCalendar, horizon, today, templateHint },
+    solveInput: {
+      config,
+      intents: liveIntents,
+      modes,
+      existingCalendar,
+      horizon,
+      today,
+      templateHint,
+      spentUids: frozen.map((f) => f.uid),
+    },
     frozen,
     resolvedIntents,
     reapedIntentIds,

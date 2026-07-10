@@ -214,6 +214,13 @@ export interface SolveInput {
    * them. Greedy and the MIP ignore this field.
    */
   templateHint?: Array<{ uid: string; date: ISODate; start: ISODateTime }>;
+  /**
+   * Uids of occurrences that ALREADY HAPPENED (present in the frozen past).
+   * Solvers must not re-plan them: the frozen instance is the record, and a
+   * re-planned duplicate would be silently dropped by the temporal overlay
+   * while still consuming space, day-exclusivity, and weekly quota.
+   */
+  spentUids?: string[];
 }
 
 export interface SolveOutput {
