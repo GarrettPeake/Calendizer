@@ -214,3 +214,20 @@ Feature: Recurrence intervals greater than one
     And an occurrence of "audit" is placed on "2026-07-13"
     And no occurrence of "audit" is placed on "2026-07-27"
     And there are no conflicts
+
+  Scenario: Biweekly Saturday groceries — one occurrence per two-week bucket, not every Saturday
+    When I add the intent:
+      """
+      {
+        "subject": "groceries", "mode": "default", "priority": 45,
+        "duration": [150, 150],
+        "window": { "not_before": "08:00", "not_after": "18:00" },
+        "cardinality": { "period": { "unit": "week", "interval": 2 }, "days": { "weekdays": ["SA"] } }
+      }
+      """
+    And I solve
+    Then there are 2 occurrences of "groceries"
+    And every occurrence of "groceries" falls on a weekday in "SA"
+    And occurrences of "groceries" fall on dates "2026-07-11, 2026-07-25"
+    And no two occurrences overlap
+    And there are no conflicts

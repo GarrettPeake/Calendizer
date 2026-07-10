@@ -216,7 +216,21 @@ function chooseDays(days: ISODate[], card: Cardinality): ISODate[] {
   if ('dates' in spec) return days.filter((d) => spec.dates.includes(d));
   if ('weekdays' in spec) {
     const set = new Set(spec.weekdays.map((w) => w.toUpperCase()));
-    return days.filter((d) => set.has(weekdayCode(d)));
+    const matched = days.filter((d) => set.has(weekdayCode(d)));
+    // Multi-week buckets: "every other week on SA" means ONE occurrence per
+    // listed weekday per bucket (the first — a stable 14/21/…-day cadence),
+    // not every matching calendar day inside the bucket. Weekly (interval 1)
+    // and month/mode buckets keep the every-listed-weekday reading.
+    if (card.period?.unit === 'week' && (card.period.interval ?? 1) > 1) {
+      const seen = new Set<string>();
+      return matched.filter((d) => {
+        const w = weekdayCode(d);
+        if (seen.has(w)) return false;
+        seen.add(w);
+        return true;
+      });
+    }
+    return matched;
   }
   // count: place the guaranteed floor, spread evenly.
   return spreadPick(days, spec.count[0]);

@@ -93,7 +93,10 @@ step.
 
 **How many occurrences are placed (the floor is what you get):**
 - `days.count: [min,max]` → exactly **min** days are chosen per period bucket.
-- `days.weekdays` → every listed weekday present in the bucket.
+- `days.weekdays` → every listed weekday present in the bucket — EXCEPT
+  multi-week buckets (`period.unit: week`, `interval ≥ 2`), where each listed
+  weekday yields ONE occurrence per bucket (its first match): "every other
+  week on SA" is one grocery run per fortnight, not both Saturdays.
 - `days.dates` → exactly those dates (that fall in the horizon).
 - `per_day.count: [min,max]` → exactly **min** occurrences per chosen day.
 - `total: [min, max]` → `max` caps & terminates lifetime count; a `min` with **no**
