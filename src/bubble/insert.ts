@@ -59,10 +59,7 @@ export class WeekState {
     readonly modelUids: Set<string>,
     private readonly placedByUid: Map<string, Placement>,
     private readonly c: Construction,
-    private readonly config: GlobalConfig,
-    /** Hard-placed conflict events: locked in but ignored — neither arranged
-     *  nor terrain (they overlap whatever they overlap; user spec). */
-    private readonly ignoredUids: ReadonlySet<string> = new Set()
+    private readonly config: GlobalConfig
   ) {
     for (const d of dates) this.seq.set(d, []);
   }
@@ -93,7 +90,7 @@ export class WeekState {
       const abs: Array<{ startAbs: number; endAbs: number; label: string }> = [];
       for (const f of this.c.fixedOccupied) abs.push(f);
       for (const p of this.placedByUid.values()) {
-        if (this.modelUids.has(p.slot.uid) || this.ignoredUids.has(p.slot.uid)) continue;
+        if (this.modelUids.has(p.slot.uid)) continue;
         abs.push(occFor(p, this.c.origin));
       }
       this.obstacles = new Map();

@@ -1,8 +1,8 @@
 /**
  * Client-side scheduling. The pure `assembleSchedule` pipeline (shared with the
  * Worker fallback) runs in the browser: instant preview, no server round-trip.
- * Pass a `solver` (the lazily-loaded MIP from ./milp) to optimize; without one
- * the greedy engine runs — that's the instant-preview path.
+ * Pass a `solver` to optimize; without one the greedy engine runs — that's
+ * the instant-preview path (and the degraded fallback if the worker dies).
  */
 import { assembleSchedule, type GlobalConfig, type Instance, type Solver } from 'calendizer';
 import type { ModeRecord } from '../api';

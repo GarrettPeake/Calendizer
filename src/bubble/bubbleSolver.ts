@@ -160,8 +160,7 @@ function solveBubble(
     // Bubble constructs the week fresh: movable placements clear.
     for (const uid of movableUids) placedByUid.delete(uid);
 
-    const ignoredUids = new Set<string>();
-    const state = new WeekState(dates, itemByUid, movableUids, placedByUid, c, config, ignoredUids);
+    const state = new WeekState(dates, itemByUid, movableUids, placedByUid, c, config);
     const habitTargets = habit.targets();
 
     const ctx: WeekCtx = {
@@ -175,7 +174,6 @@ function solveBubble(
       c,
       config,
       habitTargets,
-      ignoredUids,
       rng,
       monday,
     };
@@ -190,6 +188,7 @@ function solveBubble(
       pooled = result.pooled;
     };
     if (template && templateScore) {
+      const allMovable = [...movableUids]; // hardPlace shrinks the live set
       const r = pourTemplate(ctx, template, budget);
       pops = r.pops;
       pooled = r.pooled;
@@ -204,12 +203,13 @@ function solveBubble(
       if (ok) {
         poured = true;
       } else {
-        // Element-wise gate failed — reset the week and solve fresh.
-        for (const uid of movableUids) {
+        // Element-wise gate failed — reset the week (locks included) and
+        // solve fresh.
+        for (const uid of allMovable) {
           state.remove(uid);
           placedByUid.delete(uid);
+          movableUids.add(uid);
         }
-        ignoredUids.clear();
         state.invalidateObstacles();
         fresh();
       }
@@ -252,7 +252,6 @@ interface WeekCtx {
   c: Construction;
   config: GlobalConfig;
   habitTargets: Map<string, number>;
-  ignoredUids: Set<string>;
   rng: Rng;
   monday: ISODate;
 }
@@ -313,7 +312,7 @@ function weekScoreExt(ctx: WeekCtx): number[] {
   let earliness = 0;
   for (const item of ctx.movable) {
     const p = ctx.placedByUid.get(item.slot.uid);
-    if (!p || ctx.ignoredUids.has(item.slot.uid)) continue;
+    if (!p || !ctx.movableUids.has(item.slot.uid)) continue; // locked items are constants
     const target = ctx.habitTargets.get(habitKeyOf(item));
     if (target !== undefined) habitDist += Math.abs(p.startMin - target);
     const bub = ctx.state.bubbleOn(item.slot.uid, p.date);
@@ -432,7 +431,7 @@ function optimize(ctx: WeekCtx, steps: number): void {
     improved = false;
     // Regret: unfilled weighted duration + habit distance. Recomputed per sweep.
     const order = ctx.movable
-      .filter((i) => ctx.placedByUid.has(i.slot.uid) && !ctx.ignoredUids.has(i.slot.uid))
+      .filter((i) => ctx.placedByUid.has(i.slot.uid) && ctx.movableUids.has(i.slot.uid))
       .map((item) => {
         const p = ctx.placedByUid.get(item.slot.uid)!;
         const bub = ctx.state.bubbleOn(item.slot.uid, p.date);
@@ -464,21 +463,29 @@ function optimize(ctx: WeekCtx, steps: number): void {
   }
 }
 
-/** P3: hard-place at minimum overlap (greedy's bestPlacement), then lock. */
+/** P3: hard-place at minimum overlap (greedy's bestPlacement), then lock.
+ *  Overlap with a BLOCKER is preferred over overlap with a real event: the
+ *  blocker absorbs it as a `blockedBy` label (winter's in-work-hours sunset
+ *  lives inside Work like lunch does) while a real overlap is a visible
+ *  conflict — so first seek a slot that is clean among non-blockers. */
 function hardPlace(ctx: WeekCtx, item: Item): void {
   const uid = item.slot.uid;
   const days = ctx.candDays.get(uid) ?? [];
   const occupied: Occupied[] = [...ctx.c.fixedOccupied];
+  const nonBlocker: Occupied[] = [...ctx.c.fixedOccupied];
   for (const p of ctx.placedByUid.values()) {
     if (p.slot.uid === uid) continue;
-    occupied.push(occFor(p, ctx.c.origin));
+    const occ = occFor(p, ctx.c.origin);
+    occupied.push(occ);
+    if (!p.intent.blocker) nonBlocker.push(occ);
   }
   const slot = {
     ...item.slot,
     date: days.includes(item.slot.date) ? item.slot.date : days[0] ?? item.slot.date,
     bucketDates: days.length > 0 ? days : undefined,
   };
-  const r = bestPlacement(slot, item.intent, ctx.config, occupied, ctx.c.origin);
+  const soft = bestPlacement(slot, item.intent, ctx.config, nonBlocker, ctx.c.origin);
+  const r = soft.overlapMin === 0 ? soft : bestPlacement(slot, item.intent, ctx.config, occupied, ctx.c.origin);
   const placement: Placement = {
     slot: item.slot,
     intent: item.intent,
@@ -490,8 +497,17 @@ function hardPlace(ctx: WeekCtx, item: Item): void {
     endPinned: item.endPinned,
   };
   ctx.placedByUid.set(uid, placement);
-  ctx.ignoredUids.add(uid); // locked in but ignored (user spec)
+  // Locked: later phases never re-place it, and it becomes TERRAIN. Movable
+  // events it landed on re-layout around it (a winter sunset wedged at the
+  // end of Work pushes Pottery later, exactly as the exact solver did);
+  // whatever cannot re-place cascades into its own hard placement, and only
+  // overlap against genuinely immovable terrain survives as a conflict.
+  ctx.movableUids.delete(uid);
   ctx.state.invalidateObstacles();
+  for (const poppedUid of ctx.state.reflowAll()) {
+    const popped = ctx.itemByUid.get(poppedUid)!;
+    if (!placeBest(ctx, popped) && !popped.slot.optional) hardPlace(ctx, popped);
+  }
 }
 
 /** The fresh path: P1 → P2 → P3 → P4 → P5. */
