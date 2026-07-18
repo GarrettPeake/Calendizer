@@ -14,7 +14,12 @@ import {
 } from './solveService';
 import { parseSmart, parseSmartEdit } from './smart';
 
-const STALE_FEED_DAYS = 7; // feed re-solves server-side only if the stored calendar is older
+// Feed re-solves server-side only if the stored calendar is older than this.
+// 10 weeks: the horizon is a year, so a feed stays useful for months without a
+// client publish — the fallback exists for truly abandoned-but-subscribed
+// calendars, not a one-week vacation (which its greedy re-solve handled badly
+// enough to lose the planned week before storeCalendar retro-froze history).
+const STALE_FEED_DAYS = 70;
 
 const app = new Hono<{ Bindings: Env; Variables: Vars }>();
 
