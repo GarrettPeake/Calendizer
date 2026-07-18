@@ -495,6 +495,9 @@ function hardPlace(ctx: WeekCtx, item: Item): void {
   };
   const soft = bestPlacement(slot, item.intent, ctx.config, nonBlocker, ctx.c.origin);
   const r = soft.overlapMin === 0 ? soft : bestPlacement(slot, item.intent, ctx.config, occupied, ctx.c.origin);
+  // Day-exclusivity pigeonhole: every candidate day already hosts this intent.
+  // Drop the occurrence — hard-place guarantees a position, never a double.
+  if (r.doubled) return;
   const placement: Placement = {
     slot: item.slot,
     intent: item.intent,

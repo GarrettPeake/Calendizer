@@ -167,7 +167,9 @@ test('same-intent occurrences never share a day (the "two Park times on Saturday
   const g = solve(input);
   const daysOf = (out: { instances: Instance[] }) => out.instances.filter((i) => i.subject === 'Park time').map((i) => i.date);
   const gDays = daysOf(g);
-  assert.ok(new Set(gDays).size < gDays.length, 'premise: greedy doubles a day'); // the gap being pinned
+  // Day-exclusivity is a hard gate in greedy too now (the week-away report):
+  // this line used to assert the OPPOSITE as the gap the MIP closed.
+  assert.equal(new Set(gDays).size, gDays.length, `greedy doubled: ${gDays.join(',')}`);
   const m = createMilpSolver(highs).solve(input);
   const mDays = daysOf(m);
   assert.equal(new Set(mDays).size, mDays.length, `milp doubled: ${mDays.join(',')}`);

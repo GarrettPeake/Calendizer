@@ -207,8 +207,20 @@ export function constructGreedy(input: SolveInput): Construction {
   for (const item of items) {
     const { intent, slot, pinned, endPinned } = item;
     const bp = bestPlacement(slot, intent, config, occupied, origin);
-    if (slot.optional && (bp.unsatisfiable || bp.overlapMin > 0)) {
+    if (slot.optional && (bp.unsatisfiable || bp.overlapMin > 0 || bp.doubled)) {
       dropped.push(item);
+      continue;
+    }
+    if (bp.doubled) {
+      // A required occurrence with no free day left (day-exclusivity
+      // pigeonhole — e.g. a weekly count larger than the days remaining).
+      // Dropping it is honest; doubling it on an occupied day never is.
+      conflicts.push({
+        kind: 'floor-unmet',
+        message: `"${intent.subject}" needs another day in the period of ${slot.date}, but every candidate day already has one.`,
+        involved: [intent.subject],
+        date: slot.date,
+      });
       continue;
     }
     const placement: Placement = {
@@ -298,6 +310,10 @@ export interface BestPlacement {
   overlapMin: number;
   /** The window was too small for the duration floor on the chosen day. */
   unsatisfiable: boolean;
+  /** Every candidate day already hosts this intent (day-exclusivity pigeonhole).
+   *  Callers must DROP the occurrence rather than place it — a missing
+   *  occurrence is honest, two same-intent events on one day never are. */
+  doubled: boolean;
 }
 
 /**
@@ -328,6 +344,7 @@ export function bestPlacement(
       placedDuringSleep: isInSleep(start, durationMin, slot.date, config),
       overlapMin: overlapAt(occupied, origin, slot.date, start, durationMin),
       unsatisfiable: false,
+      doubled: false,
     };
   }
   // Pinned end: the end is fixed; start = end − floor (fillToMax grows it backward).
@@ -339,21 +356,38 @@ export function bestPlacement(
       placedDuringSleep: isInSleep(start, durationMin, slot.date, config),
       overlapMin: overlapAt(occupied, origin, slot.date, start, durationMin),
       unsatisfiable: false,
+      doubled: false,
     };
   }
 
   // Candidate days: the chosen day first; flexible (solver-chosen) days may
-  // spill to other bucket days — least-loaded first. A spill never lands on a day
-  // this intent already occupies, so `days.count` stays a count of distinct DAYS
-  // (the chosen day itself is always allowed, for per_day stacking).
-  const dates: ISODate[] = [slot.date];
+  // spill to other bucket days — least-loaded first. Day-exclusivity is HARD:
+  // `days.count` counts distinct DAYS, so no candidate — not even the chosen
+  // day — may already host this intent. (The chosen-day free pass let siblings
+  // that all spilled onto the last visible days of a week double up: two Park
+  // times back-to-back on Saturday.) per_day stacks legitimately share a day.
+  const ownDays = new Set(
+    occupied.filter((o) => o.label === intent.subject).map((o) => addDays(origin, Math.floor(o.startAbs / 1440)))
+  );
+  const dates: ISODate[] = [];
+  if (slot.perDayCount > 1 || !ownDays.has(slot.date)) dates.push(slot.date);
   if (slot.flexibleDay && slot.bucketDates && slot.bucketDates.length > 1) {
-    const ownDays = new Set(
-      occupied.filter((o) => o.label === intent.subject).map((o) => addDays(origin, Math.floor(o.startAbs / 1440)))
-    );
     const others = slot.bucketDates.filter((d) => d !== slot.date && !ownDays.has(d));
     others.sort((a, b) => loadOn(occupied, origin, a) - loadOn(occupied, origin, b) || (a < b ? -1 : 1));
     dates.push(...others);
+  }
+  // Pigeonhole: more occurrences than free days. Surface it instead of placing.
+  if (dates.length === 0) {
+    const win = resolveWindow(intent.window, slot.date, config);
+    const start = ceilTo(win.notBefore, grid);
+    return {
+      date: slot.date,
+      startMin: start,
+      placedDuringSleep: isInSleep(start, durationMin, slot.date, config),
+      overlapMin: overlapAt(occupied, origin, slot.date, start, durationMin),
+      unsatisfiable: false,
+      doubled: true,
+    };
   }
 
   // Phase A — earliest zero-overlap slot (unchanged placement for clean cases).
@@ -379,7 +413,7 @@ export function bestPlacement(
     let start = findFreeStart(searchLo, searchHi, durationMin, grid, date, origin, occupied, padding);
     if (start === null) start = findFreeStart(lo, hi, durationMin, grid, date, origin, occupied, padding);
     if (start !== null) {
-      return { date, startMin: start, placedDuringSleep: isInSleep(start, durationMin, date, config), overlapMin: 0, unsatisfiable: false };
+      return { date, startMin: start, placedDuringSleep: isInSleep(start, durationMin, date, config), overlapMin: 0, unsatisfiable: false, doubled: false };
     }
   }
 
@@ -399,7 +433,7 @@ export function bestPlacement(
         ov < best.overlapMin ||
         (ov === best.overlapMin && !sleeping && best.placedDuringSleep)
       ) {
-        best = { date, startMin: s, placedDuringSleep: sleeping, overlapMin: ov, unsatisfiable: false };
+        best = { date, startMin: s, placedDuringSleep: sleeping, overlapMin: ov, unsatisfiable: false, doubled: false };
         if (ov === 0) break; // can't do better on this date
       }
     }
@@ -416,6 +450,7 @@ export function bestPlacement(
     placedDuringSleep: isInSleep(start, durationMin, slot.date, config),
     overlapMin: overlapAt(occupied, origin, slot.date, start, durationMin),
     unsatisfiable: true,
+    doubled: false,
   };
 }
 
@@ -457,7 +492,7 @@ export function repair(placements: Placement[], fixed: Occupied[], config: Globa
       for (let j = 0; j < placements.length; j++) if (j !== i) others.push(occAll[j]);
 
       const bp = bestPlacement(p.slot, p.intent, config, others, origin);
-      if (bp.overlapMin < current) {
+      if (!bp.doubled && bp.overlapMin < current) {
         p.date = bp.date;
         p.startMin = bp.startMin;
         p.placedDuringSleep = bp.placedDuringSleep;

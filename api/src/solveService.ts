@@ -101,6 +101,17 @@ export async function storeCalendar(
   const today = localToday(offset);
   const retentionStart = addDays(today, -RETENTION_DAYS);
 
+  // The stored calendar is the ONLY copy of days that were planned but never
+  // republished (a user away for a week past the staleness threshold). Freeze
+  // its elapsed slice BEFORE this write replaces it — otherwise the fallback
+  // re-solve destroys that history (the "week away, days now empty" report).
+  // INSERT OR IGNORE keeps the earliest-frozen row, so the previously
+  // published plan wins over anything the incoming payload claims about the past.
+  const prior = await getCache(db, userId);
+  if (prior) {
+    const priorInstances: Instance[] = JSON.parse(prior.instances_json);
+    await freezeInstances(db, userId, priorInstances.filter((i) => i.start < nowDT && i.date >= retentionStart));
+  }
   await freezeInstances(db, userId, cal.instances.filter((i) => i.start < nowDT));
   await pruneFrozen(db, userId, retentionStart);
   const frozen = await listFrozen(db, userId, retentionStart);

@@ -108,6 +108,34 @@ test('the frozen past is preserved verbatim over a re-solve (immutability)', () 
   assert.equal(kept!.start, '2026-07-01T08:00'); // unchanged, even though now=09:00
 });
 
+test('a week of planned-but-unopened days is carried, and its quota counts as spent', () => {
+  // The week-away report (ead7a279): the user last published a week ago; every
+  // planned day since then is now elapsed. Passing the previous calendar as
+  // `frozen` must (1) keep those days verbatim and (2) mark their uids spent so
+  // the week's quota is NOT re-crammed into the remaining visible days.
+  const frozen: Instance[] = ['2026-06-25', '2026-06-26', '2026-06-27', '2026-06-28', '2026-06-29', '2026-06-30'].map(
+    (date) => ({
+      uid: `walk|day:${date}|0`,
+      intentId: 'walk',
+      subject: 'walk',
+      date,
+      start: `${date}T08:00`,
+      end: `${date}T08:30`,
+      durationMin: 30,
+    })
+  );
+  const r = assembleSchedule(base({ intents: [dailyIntent()], frozen }));
+  for (const f of frozen) {
+    const kept = r.instances.find((i) => i.uid === f.uid);
+    assert.ok(kept, `${f.date} carried`);
+    assert.equal(kept!.start, f.start);
+  }
+  // No day ever hosts two walks (spent uids are not re-planned).
+  const byDay = new Map<string, number>();
+  for (const i of r.instances) byDay.set(i.date, (byDay.get(i.date) ?? 0) + 1);
+  assert.ok([...byDay.values()].every((n) => n === 1));
+});
+
 test('retention drops frozen history older than the window', () => {
   const old: Instance[] = [
     {

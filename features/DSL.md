@@ -105,6 +105,11 @@ step.
 - `total: [min, max]` → `max` caps & terminates lifetime count; a `min` with **no**
   `days`/`per_day` spec is a flat quota of **min** occurrences spread across the span.
 - No `days`/`per_day` and a periodic bucket → **1** day per bucket.
+- **Day-exclusivity is a hard gate in every engine**: two occurrences of the same
+  intent never share a day (`days.count` counts distinct DAYS); only `per_day`
+  stacks legitimately share one. When more occurrences remain than free days
+  (pigeonhole — e.g. most of the week already elapsed), the excess is DROPPED
+  with a `floor-unmet` conflict rather than doubled onto an occupied day.
 
 **Which days get chosen (even spread, deterministic).** When the solver chooses `k`
 of `n` available days, it uses this exact rule — for `i` in `0..k-1`:
