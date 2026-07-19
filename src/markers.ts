@@ -91,8 +91,15 @@ export function resolveSleepBlackout(
   date: ISODate,
   config: GlobalConfig
 ): { sleepStart: number; wakeStart: number } {
-  return {
-    sleepStart: resolveTimeValue(config.sleep, date, config),
-    wakeStart: resolveTimeValue(config.wakeup, date, config),
-  };
+  const wakeStart = resolveTimeValue(config.wakeup, date, config);
+  let sleepStart = resolveTimeValue(config.sleep, date, config);
+  // A bedtime at or before wakeup means AFTER midnight (sleep "00:00" = the
+  // stroke of midnight ending this day; "01:00" = 1am tomorrow). Day-local
+  // minutes legally exceed 1440, so normalize instead of assuming an evening
+  // bedtime — raw sleepStart <= wakeStart made isInSleep flag the ENTIRE day
+  // and trimBySleep always yield, silently disabling sleep avoidance (the
+  // "make dinner placed at midnight" report). sleep === wakeup degenerates to
+  // an empty blackout (24h waking), matching the validator's warning.
+  if (sleepStart <= wakeStart) sleepStart += 1440;
+  return { sleepStart, wakeStart };
 }

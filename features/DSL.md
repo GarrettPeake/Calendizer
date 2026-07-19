@@ -153,6 +153,10 @@ sleep window is removed from an intent's legal window **only while that leaves r
 if the only legal slot is inside sleep (e.g. a `starts_at: "03:00"` with `wakeup`
 later), the event is placed there, marked "placed during sleep", and **no conflict**
 is raised. Normal daytime events are **not** marked placed-during-sleep.
+A bedtime at or before wakeup means **after midnight**: `sleep: "00:00"` protects
+`[00:00, wakeup)` with no evening blackout, and `sleep: "01:00"` lets evening events
+spill past midnight until 1am (day-local minutes exceed 1440; never assume an
+evening bedtime).
 
 **Blockers.** An intent with `"blocker": true` is placed exactly like any other
 (same priority, windows, cardinality — everything schedules around it), but its

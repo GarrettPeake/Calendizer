@@ -136,6 +136,20 @@ test('a week of planned-but-unopened days is carried, and its quota counts as sp
   assert.ok([...byDay.values()].every((n) => n === 1));
 });
 
+test('with a midnight bedtime, an empty-window daily lands in waking hours', () => {
+  // Report 2ada1b2a: sleep "00:00" disabled sleep avoidance entirely and an
+  // empty-window intent packed at 00:00, inside the blackout.
+  const cfg: GlobalConfig = { ...config, wakeup: '06:45', sleep: '00:00' };
+  const dinner = dailyIntent({ id: 'dinner', subject: 'make dinner', window: {} });
+  const r = assembleSchedule(base({ config: cfg, intents: [dinner] }));
+  const future = r.instances.filter((i) => i.date > '2026-07-01');
+  assert.ok(future.length > 0);
+  for (const i of future) {
+    assert.ok(!i.placedDuringSleep, `${i.date} ${i.start} flagged as sleep`);
+    assert.ok(i.start.slice(11) >= '06:45', `${i.date} placed at ${i.start.slice(11)}, inside the blackout`);
+  }
+});
+
 test('retention drops frozen history older than the window', () => {
   const old: Instance[] = [
     {

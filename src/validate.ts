@@ -184,8 +184,10 @@ export function validateIntent(intent: Intent, ctx: IntentValidationContext = {}
   if (ctx.config) {
     const wake = clockMinutes(ctx.config.wakeup);
     const sleep = clockMinutes(ctx.config.sleep);
-    if (wake != null && sleep != null && wake < sleep && nb != null && na != null) {
-      const insideNight = na <= wake || nb >= sleep;
+    if (wake != null && sleep != null && wake !== sleep && nb != null && na != null) {
+      // A bedtime at/before wakeup is an after-midnight bedtime: the only
+      // same-day blackout is the morning [00:00, wake).
+      const insideNight = na <= wake || (sleep > wake && nb >= sleep);
       if (insideNight) b.warn('window.not_before', 'This window falls during your sleep hours — it’ll be scheduled there anyway.');
     }
   }
@@ -362,7 +364,7 @@ export function validateConfig(config: GlobalConfig): ValidationResult {
   if (sleep == null) b.err('sleep', 'Bedtime must be a time like HH:MM (00:00–23:59).');
   if (wake != null && sleep != null) {
     if (wake === sleep) b.warn('sleep', 'Wakeup and bedtime are the same — there’ll be no protected sleep window.');
-    else if (sleep < wake) b.warn('sleep', 'Bedtime is earlier than wakeup — the sleep window may not be enforced as expected.');
+    else if (sleep < wake) b.warn('sleep', 'Bedtime is at or after midnight — sleep is protected from then until wakeup.');
   }
 
   if (!isInt(config.grid) || config.grid < 1) b.err('grid', 'Grid must be a whole number of minutes, at least 1.');

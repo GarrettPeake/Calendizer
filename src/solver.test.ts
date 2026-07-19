@@ -4,7 +4,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { constructGreedy } from './solver';
+import { constructGreedy, isInSleep, trimBySleep } from './solver';
 import { GlobalConfig, Intent, SolveInput } from './types';
 
 const config: GlobalConfig = {
@@ -67,6 +67,26 @@ test('greedy pigeonhole with every day occupied drops all excess occurrences', (
   );
   assert.equal(c.placements.filter((p) => p.intent.id === 'park').length, 0);
   assert.equal(c.conflicts.filter((k) => k.kind === 'floor-unmet').length, 2);
+});
+
+// Report 2ada1b2a: sleep "00:00" (bedtime at midnight) made raw sleepStart (0)
+// sit below wakeup, so isInSleep flagged the WHOLE day and trimBySleep always
+// yielded — sleep avoidance silently disabled, dinner placed at 00:00.
+test('a midnight bedtime protects [00:00, wakeup) and nothing else', () => {
+  const cfg: GlobalConfig = { ...config, wakeup: '06:45', sleep: '00:00' };
+  const d = '2026-07-20';
+  assert.equal(isInSleep(0, 30, d, cfg), true); // inside the morning blackout
+  assert.equal(isInSleep(405, 30, d, cfg), false); // at wakeup
+  assert.equal(isInSleep(1410, 30, d, cfg), false); // ends exactly at midnight
+  assert.deepEqual(trimBySleep(0, 1410, 30, d, cfg), [405, 1410]);
+});
+
+test('an after-midnight bedtime allows evening spillover until then', () => {
+  const cfg: GlobalConfig = { ...config, wakeup: '06:45', sleep: '01:00' };
+  const d = '2026-07-20';
+  assert.equal(isInSleep(1440, 60, d, cfg), false); // 00:00-01:00 next day: awake
+  assert.equal(isInSleep(1450, 60, d, cfg), true); // runs past 01:00
+  assert.deepEqual(trimBySleep(0, 1470, 30, d, cfg), [405, 1470]);
 });
 
 test('per_day stacks still share their day', () => {
